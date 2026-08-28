@@ -111,6 +111,7 @@ public class MissionManager : MonoBehaviour
         GameCleared = true;
         Debug.Log("[게임 클리어] 모든 스테이지 완료");
         if (missionStatusText != null) missionStatusText.text = "MISSION COMPLETE";
+        if (GameManager.Instance != null) GameManager.Instance.OnGameCleared();
     }
 
     public void UpdateMissionUI()

@@ -35,6 +35,7 @@ public class PlayerController : MonoBehaviour
     [Header("AK-47")]
     public int magazineSize = 30;
     public int reserveAmmo = 90;
+    public int maxReserveAmmo = 180;
     public float akDamage = 25f;
     public float fireRate = 0.1f;
     public float range = 100f;
@@ -110,6 +111,7 @@ public class PlayerController : MonoBehaviour
     private void Update()
     {
         if (IsDead) return;
+        if (GameManager.Instance != null && !GameManager.Instance.IsPlaying) return;
         HandleMouseLook();
         HandleMovement();
         HandleStamina();
@@ -347,10 +349,33 @@ public class PlayerController : MonoBehaviour
     {
         IsDead = true;
         SetTrigger("die");
+
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnPlayerDied();
+            return;
+        }
+
+        // GameManager 없는 단독 테스트용 폴백
         Cursor.lockState = CursorLockMode.None;
         Cursor.visible = true;
-        // ponytail: 씬 리로드로 재시작. 게임오버 UI/체크포인트 필요하면 별도 GameManager로.
         StartCoroutine(RestartAfter(3f));
+    }
+
+    /// <summary>회복 아이템 획득. 체력이 이미 최대면 false(획득 안 함).</summary>
+    public bool AddHealth(float amount)
+    {
+        if (IsDead || Hp >= maxHp) return false;
+        Hp = Mathf.Min(maxHp, Hp + amount);
+        return true;
+    }
+
+    /// <summary>탄약 아이템 획득. 예비탄이 이미 최대면 false(획득 안 함).</summary>
+    public bool AddAmmo(int amount)
+    {
+        if (reserveAmmo >= maxReserveAmmo) return false;
+        reserveAmmo = Mathf.Min(maxReserveAmmo, reserveAmmo + amount);
+        return true;
     }
 
     private IEnumerator RestartAfter(float delay)

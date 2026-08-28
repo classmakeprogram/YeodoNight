@@ -7,7 +7,7 @@ using UnityEngine;
 public class EnemyTarget : MonoBehaviour
 {
     [Header("스탯")]
-    [Tooltip("스테이지 1~2 기준 체력. 스테이지 3부터 MissionManager가 보너스 체력을 더한다.")]
+    [Tooltip("스테이지 1~2 / 웨이브 1 기준 체력. 스테이지·웨이브에 따라 스포너가 보정한다.")]
     public float baseHp = 80f;
     public bool isHiddenEnemy = false;
 
@@ -38,6 +38,9 @@ public class EnemyTarget : MonoBehaviour
         Hp -= damage;
         if (anim != null) anim.SetTrigger("hit");
 
+        if (HUD.Instance != null)
+            HUD.Instance.ReportHit(transform.position + Vector3.up * 1.6f, damage, isHeadshot, Hp <= 0f);
+
         if (Hp <= 0f) Die(isHeadshot);
     }
 
@@ -55,6 +58,10 @@ public class EnemyTarget : MonoBehaviour
 
         if (MissionManager.Instance != null)
             MissionManager.Instance.OnEnemyKilled(isHeadshot, isHiddenEnemy);
+        if (ScoreManager.Instance != null)
+            ScoreManager.Instance.AddKill(isHeadshot, isHiddenEnemy);
+        if (EnemySpawner.Instance != null)
+            EnemySpawner.Instance.NotifyEnemyKilled();
 
         Destroy(gameObject, deathDelay);
     }
