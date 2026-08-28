@@ -1,276 +1,383 @@
-using UnityEngine;
-using UnityEngine.UI;
 using System.Collections;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
+/// <summary>
+/// 플레이어 이동 / 시점 / 스태미너 / AK-47 / 카타나 / 조준 / 사망 처리.
+/// 애니메이션은 animator 필드가 연결된 경우에만 파라미터를 세팅한다(없어도 동작).
+/// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
 {
-    [Header("Movement Settings")]
-    public float walkSpeed = 5f;        
-    public float runSpeed = 8f;         
-    public float crouchSpeed = 2.5f;    
-    public float jumpForce = 5f;        
-    public float rollForce = 15f;       
-    public float crouchHeight = 1.0f;   
-    public float standHeight = 2.0f;    
-    
-    private CharacterController controller;
-    private Vector3 velocity;
-    private bool isGrounded;
-    private bool isCrouching = false;
+    public enum WeaponType { AK47 = 0, Katana = 1 }
 
-    [Header("Mouse Look")]
+    [Header("이동")]
+    public float walkSpeed = 5f;
+    public float sprintSpeed = 8f;
+    public float crouchSpeed = 2.5f;
+    public float jumpForce = 5f;
+    public float rollSpeed = 12f;
+    public float rollDuration = 0.4f;
+    public float standHeight = 2f;
+    public float crouchHeight = 1f;
+
+    [Header("스태미너")]
+    public float staminaMax = 100f;
+    public float sprintDrainPerSec = 20f;
+    public float rollCost = 25f;
+    public float staminaRegenPerSec = 15f;
+    public float staminaRegenDelay = 1f;
+
+    [Header("마우스")]
     public float mouseSensitivity = 150f;
-    private float xRotation = 0f;
 
-    [Header("AK-47 Gun & Bullet Settings")]
-    public int currentAmmo = 30;         
-    public int maxAmmo = 120;            
-    public bool isReloading = false;     
-    [SerializeField] private float fireRate = 0.1f; 
-    [SerializeField] private float range = 100f;    
-    private float nextFireTime = 0f;
+    [Header("AK-47")]
+    public int magazineSize = 30;
+    public int reserveAmmo = 90;
+    public float akDamage = 25f;
+    public float fireRate = 0.1f;
+    public float range = 100f;
+    public float reloadTime = 2.5f;
     public float bulletSpeed = 40f;
 
-    [Header("Katana & Weapon Swap")]
-    public GameObject akObject;          
-    public GameObject katanaObject;      
-    public TrailRenderer katanaTrail;    
-    private const float KATANA_DAMAGE = 40.0f; 
-    private bool isAttacking = false;    
-    private enum WeaponType { AK47, Katana }
+    [Header("카타나")]
+    public float katanaDamage = 40f;
+    public float katanaRange = 3f;
+    public float katanaCooldown = 0.5f;
+
+    [Header("무기 오브젝트")]
+    public GameObject akObject;
+    public GameObject katanaObject;
+    public TrailRenderer katanaTrail;
+
+    [Header("조준 / 카메라")]
+    public Camera playerCam;
+    public float defaultFOV = 60f;
+    public float adsFOV = 40f;
+    public float zoomSpeed = 10f;
+
+    [Header("UI")]
+    public Text hpText;
+    public Text ammoText;
+    public Text staminaText;
+
+    [Header("스탯")]
+    public float maxHp = 100f;
+
+    [Header("애니메이션 (선택)")]
+    public Animator animator;
+
+    // --- 런타임 상태 (읽기 전용 노출) ---
+    public float Hp { get; private set; }
+    public float Stamina { get; private set; }
+    public int CurrentAmmo { get; private set; }
+    public bool IsDead { get; private set; }
+
+    private CharacterController controller;
+    private Vector3 velocity;
+    private float xRotation;
+    private bool isGrounded;
+    private bool isCrouching;
+    private bool isSprinting;
+    private bool isReloading;
+    private bool isRolling;
+    private bool isAttacking;
+    private float lastStaminaUseTime;
+    private float nextFireTime;
+    private float nextKatanaTime;
     private WeaponType currentWeapon = WeaponType.AK47;
 
-    [Header("UI & Camera Zoom")]
-    public Camera playerCam;             
-    public Text hpText;                  
-    public Text ammoText;                
-    public float hp = 100f;              
-    private float defaultFOV = 60f;      
-    private float zoomFOV = 40f;         
-    private float zoomSpeed = 10f;       
+    // ponytail: 트레이서용 공유 머티리얼 1개만 생성. 이펙트팀 머즐/트레이서 에셋 나오면 SpawnTracer 교체.
+    private static Material s_tracerMat;
 
-    void Start()
+    private void Awake()
     {
-        gameObject.tag = "Player";
         controller = GetComponent<CharacterController>();
-        
+        Hp = maxHp;
+        Stamina = staminaMax;
+        CurrentAmmo = magazineSize;
+    }
+
+    private void Start()
+    {
+        if (!CompareTag("Player")) gameObject.tag = "Player";
         Cursor.lockState = CursorLockMode.Locked;
         Cursor.visible = false;
-
-        SwapTo(WeaponType.AK47);
+        EquipWeapon(WeaponType.AK47);
     }
 
-    void Update()
+    private void Update()
     {
-        HandleMouseLook();   
-        HandleMovement();    
-        HandleWeaponSwap();  
-        HandleCombat();      
-        UpdateUI();          
+        if (IsDead) return;
+        HandleMouseLook();
+        HandleMovement();
+        HandleStamina();
+        HandleWeaponSwap();
+        HandleCombat();
+        UpdateAnimator();
+        UpdateUI();
     }
 
-    void HandleMouseLook()
+    private void HandleMouseLook()
     {
         if (playerCam == null) return;
-
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity * Time.deltaTime;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity * Time.deltaTime;
-
-        xRotation -= mouseY;
-        xRotation = Mathf.Clamp(xRotation, -85f, 85f);
-
+        float mx = Input.GetAxis("Mouse X") * mouseSensitivity * Time.deltaTime;
+        float my = Input.GetAxis("Mouse Y") * mouseSensitivity * Time.deltaTime;
+        xRotation = Mathf.Clamp(xRotation - my, -85f, 85f);
         playerCam.transform.localRotation = Quaternion.Euler(xRotation, 0f, 0f);
-        transform.Rotate(Vector3.up * mouseX);
+        transform.Rotate(Vector3.up * mx);
     }
 
-    void HandleMovement()
+    private void HandleMovement()
     {
         isGrounded = controller.isGrounded;
-        if (isGrounded && velocity.y < 0) velocity.y = -2f;
+        if (isGrounded && velocity.y < 0f) velocity.y = -2f;
 
         float x = Input.GetAxis("Horizontal");
         float z = Input.GetAxis("Vertical");
+        Vector3 input = (transform.right * x + transform.forward * z);
+        if (input.sqrMagnitude > 1f) input.Normalize();
 
-        float currentSpeed = walkSpeed;
-        if (Input.GetKey(KeyCode.LeftShift) && !isCrouching) currentSpeed = runSpeed;
-        else if (isCrouching) currentSpeed = crouchSpeed;
+        bool wantsSprint = Input.GetKey(KeyCode.LeftShift) && !isCrouching && z > 0.1f && Stamina > 0f;
+        isSprinting = wantsSprint && !isRolling;
 
-        Vector3 move = transform.right * x + transform.forward * z;
-        controller.Move(move * currentSpeed * Time.deltaTime);
+        float speed = isCrouching ? crouchSpeed : (isSprinting ? sprintSpeed : walkSpeed);
+        if (!isRolling)
+            controller.Move(input * speed * Time.deltaTime);
 
-        if (Input.GetButtonDown("Jump") && isGrounded)
+        if (Input.GetButtonDown("Jump") && isGrounded && !isCrouching && !isRolling)
         {
             velocity.y = Mathf.Sqrt(jumpForce * -2f * Physics.gravity.y);
+            SetTrigger("jump");
+        }
+
+        if (Input.GetKeyDown(KeyCode.C) && !isRolling)
+            SetCrouch(!isCrouching);
+
+        if (Input.GetKeyDown(KeyCode.Q) && isGrounded && !isRolling && Stamina >= rollCost)
+        {
+            Vector3 dir = input.sqrMagnitude > 0.01f ? input.normalized : transform.forward;
+            StartCoroutine(RollRoutine(dir));
         }
 
         velocity.y += Physics.gravity.y * Time.deltaTime;
         controller.Move(velocity * Time.deltaTime);
+    }
 
-        if (Input.GetKeyDown(KeyCode.C))
-        {
-            isCrouching = !isCrouching;
-            controller.height = isCrouching ? crouchHeight : standHeight;
-        }
+    private IEnumerator RollRoutine(Vector3 dir)
+    {
+        isRolling = true;
+        UseStamina(rollCost);
+        SetTrigger("roll");
+        if (isCrouching) SetCrouch(false);
 
-        if (Input.GetKeyDown(KeyCode.LeftControl) && isGrounded)
+        float t = 0f;
+        while (t < rollDuration)
         {
-            Vector3 rollDir = transform.forward * rollForce;
-            controller.Move(rollDir * Time.deltaTime * 5f);
+            controller.Move(dir * rollSpeed * Time.deltaTime); // 수직 이동은 HandleMovement가 계속 처리
+            t += Time.deltaTime;
+            yield return null;
         }
+        isRolling = false;
+    }
+
+    private void SetCrouch(bool value)
+    {
+        isCrouching = value;
+        controller.height = value ? crouchHeight : standHeight;
+        controller.center = new Vector3(0f, controller.height * 0.5f, 0f);
+    }
+
+    private void HandleStamina()
+    {
+        if (isSprinting)
+            UseStamina(sprintDrainPerSec * Time.deltaTime);
+        else if (Time.time - lastStaminaUseTime >= staminaRegenDelay)
+            Stamina = Mathf.Min(staminaMax, Stamina + staminaRegenPerSec * Time.deltaTime);
+    }
+
+    private void UseStamina(float amount)
+    {
+        Stamina = Mathf.Max(0f, Stamina - amount);
+        lastStaminaUseTime = Time.time;
     }
 
     private void HandleWeaponSwap()
     {
-        if (Input.GetKeyDown(KeyCode.Alpha1)) SwapTo(WeaponType.AK47);
-        if (Input.GetKeyDown(KeyCode.Alpha2)) SwapTo(WeaponType.Katana);
+        if (Input.GetKeyDown(KeyCode.Alpha1)) { EquipWeapon(WeaponType.AK47); return; }
+        if (Input.GetKeyDown(KeyCode.Alpha2)) { EquipWeapon(WeaponType.Katana); return; }
+
+        float scroll = Input.GetAxis("Mouse ScrollWheel");
+        if (Mathf.Abs(scroll) > 0.01f)
+            EquipWeapon(currentWeapon == WeaponType.AK47 ? WeaponType.Katana : WeaponType.AK47);
     }
 
-    private void SwapTo(WeaponType type)
+    private void EquipWeapon(WeaponType type)
     {
         currentWeapon = type;
         if (akObject != null) akObject.SetActive(type == WeaponType.AK47);
         if (katanaObject != null) katanaObject.SetActive(type == WeaponType.Katana);
+        SetInt("weapon", (int)type);
     }
 
-    void HandleCombat()
+    private void HandleCombat()
     {
-        bool isAttackTriggered = Input.GetButton("Fire1") || (Input.GetKey(KeyCode.LeftShift) && Input.GetMouseButton(0));
+        bool ads = currentWeapon == WeaponType.AK47 && Input.GetMouseButton(1) && !isReloading;
+        if (playerCam != null)
+        {
+            float targetFOV = ads ? adsFOV : defaultFOV;
+            playerCam.fieldOfView = Mathf.Lerp(playerCam.fieldOfView, targetFOV, Time.deltaTime * zoomSpeed);
+        }
+        SetBool("isAiming", ads);
 
         if (currentWeapon == WeaponType.AK47)
         {
-            if (!isReloading)
-            {
-                if (isAttackTriggered && Time.time >= nextFireTime)
-                {
-                    if (currentAmmo > 0) ShootAK47();
-                    else StartCoroutine(ReloadRoutine());
-                }
-            }
+            if (Input.GetKeyDown(KeyCode.R)) TryReload();
 
-            if (Input.GetKeyDown(KeyCode.R) && currentAmmo < 30 && !isReloading)
+            if (Input.GetMouseButton(0) && !isReloading && Time.time >= nextFireTime)
             {
-                StartCoroutine(ReloadRoutine());
+                if (CurrentAmmo > 0) ShootAK47();
+                else TryReload();
             }
-
-            if (Input.GetMouseButton(1))
-                playerCam.fieldOfView = Mathf.Lerp(playerCam.fieldOfView, zoomFOV, Time.deltaTime * zoomSpeed);
-            else
-                playerCam.fieldOfView = Mathf.Lerp(playerCam.fieldOfView, defaultFOV, Time.deltaTime * zoomSpeed);
         }
-        else if (currentWeapon == WeaponType.Katana)
+        else // Katana
         {
-            bool isMeleeTriggered = Input.GetMouseButtonDown(0) || (Input.GetKey(KeyCode.LeftShift) && Input.GetMouseButtonDown(0));
-            if (isMeleeTriggered && !isAttacking) StartCoroutine(KatanaAttackRoutine());
+            if (Input.GetMouseButtonDown(0) && !isAttacking && Time.time >= nextKatanaTime)
+                StartCoroutine(KatanaAttackRoutine());
         }
     }
 
     private void ShootAK47()
     {
-        currentAmmo--;
+        CurrentAmmo--;
         nextFireTime = Time.time + fireRate;
+        SetTrigger("shoot");
 
-        RaycastHit hit;
-        Vector3 targetPoint = playerCam.transform.position + playerCam.transform.forward * range;
+        Vector3 origin = playerCam.transform.position;
+        Vector3 dir = playerCam.transform.forward;
+        Vector3 endPoint = origin + dir * range;
 
-        if (Physics.Raycast(playerCam.transform.position, playerCam.transform.forward, out hit, range))
+        if (Physics.Raycast(origin, dir, out RaycastHit hit, range, ~0, QueryTriggerInteraction.Ignore))
         {
-            targetPoint = hit.point;
-
-            string targetTag = hit.collider.gameObject.tag;
-            if (targetTag == "Enemy" || targetTag == "HiddenEnemy")
-            {
-                EnemyTarget enemy = hit.transform.GetComponentInParent<EnemyTarget>();
-                bool isHidden = (targetTag == "HiddenEnemy");
-
-                if (enemy != null)
-                {
-                    if (hit.collider.name == "Head") 
-                    {
-                        enemy.TakeDamage(80f, true, isHidden);
-                        Debug.Log($"<color=red><b>[HEADSHOT!]</b></color> 무기: AK-47 | 대상: {hit.collider.transform.root.name} | 데미지: <b>80</b>");
-                    }
-                    else 
-                    {
-                        enemy.TakeDamage(25f, false, isHidden);
-                        Debug.Log($"<color=orange>[BODY HIT]</color> 무기: AK-47 | 대상: {hit.collider.transform.root.name} | 데미지: <b>25</b>");
-                    }
-                }
-            }
+            endPoint = hit.point;
+            ApplyHit(hit, akDamage);
         }
-
-        CreateVisualBullet(targetPoint);
-    }
-
-    private void CreateVisualBullet(Vector3 targetPosition)
-    {
-        GameObject bullet = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        bullet.name = "Temp_Bullet";
-        bullet.transform.position = akObject != null ? akObject.transform.position : playerCam.transform.position;
-        bullet.transform.localScale = new Vector3(0.08f, 0.08f, 0.2f);
-
-        Destroy(bullet.GetComponent<Collider>());
-
-        Renderer rend = bullet.GetComponent<Renderer>();
-        if (rend != null)
-        {
-            rend.material = new Material(Shader.Find("Unlit/Color"));
-            rend.material.color = Color.yellow;
-        }
-
-        Rigidbody rb = bullet.AddComponent<Rigidbody>();
-        rb.useGravity = false;
-        Vector3 direction = (targetPosition - bullet.transform.position).normalized;
-        rb.velocity = direction * bulletSpeed;
-
-        Destroy(bullet, 1.5f);
-    }
-
-    private IEnumerator ReloadRoutine()
-    {
-        isReloading = true;
-        yield return new WaitForSeconds(5.0f);
-        currentAmmo = 30;
-        isReloading = false;
+        SpawnTracer(endPoint);
     }
 
     private IEnumerator KatanaAttackRoutine()
     {
         isAttacking = true;
+        nextKatanaTime = Time.time + katanaCooldown;
+        SetTrigger("katanaAttack");
         if (katanaTrail != null) katanaTrail.emitting = true;
 
-        RaycastHit hit;
-        if (Physics.Raycast(playerCam.transform.position, playerCam.transform.forward, out hit, 3.0f))
-        {
-            string targetTag = hit.collider.gameObject.tag;
-            if (targetTag == "Enemy" || targetTag == "HiddenEnemy")
-            {
-                EnemyTarget enemy = hit.transform.GetComponentInParent<EnemyTarget>();
-                bool isHidden = (targetTag == "HiddenEnemy");
-
-                if (enemy != null) 
-                {
-                    enemy.TakeDamage(KATANA_DAMAGE, false, isHidden);
-                    Debug.Log($"<color=cyan>[KATANA SWING]</color> 무기: 카타나 | 대상: {hit.collider.transform.root.name} | 데미지: <b>40</b>");
-                }
-            }
-        }
+        Vector3 origin = playerCam.transform.position;
+        Vector3 dir = playerCam.transform.forward;
+        if (Physics.Raycast(origin, dir, out RaycastHit hit, katanaRange, ~0, QueryTriggerInteraction.Ignore))
+            ApplyHit(hit, katanaDamage);
 
         yield return new WaitForSeconds(0.3f);
         if (katanaTrail != null) katanaTrail.emitting = false;
-        yield return new WaitForSeconds(0.2f);
+        yield return new WaitForSeconds(0.1f);
         isAttacking = false;
     }
 
-    private void UpdateUI()
+    /// <summary>부위 콜라이더면 Hitbox로, 아니면 루트 EnemyTarget으로 몸통 데미지.</summary>
+    private void ApplyHit(RaycastHit hit, float baseDamage)
     {
-        if (hpText != null) hpText.text = $"HP: {hp:0}";
-        if (ammoText != null) ammoText.text = isReloading ? "RELOADING..." : $"AMMO: {currentAmmo} / 30";
+        Hitbox box = hit.collider.GetComponent<Hitbox>();
+        if (box != null)
+        {
+            box.Receive(baseDamage);
+            return;
+        }
+        EnemyTarget enemy = hit.collider.GetComponentInParent<EnemyTarget>();
+        if (enemy != null) enemy.TakeDamage(baseDamage, false);
+    }
+
+    private void SpawnTracer(Vector3 target)
+    {
+        GameObject b = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        b.name = "Tracer";
+        Destroy(b.GetComponent<Collider>());
+        b.transform.localScale = Vector3.one * 0.05f;
+        b.transform.position = akObject != null ? akObject.transform.position : playerCam.transform.position;
+
+        if (s_tracerMat == null)
+        {
+            s_tracerMat = new Material(Shader.Find("Unlit/Color")) { color = Color.yellow };
+        }
+        b.GetComponent<Renderer>().sharedMaterial = s_tracerMat;
+
+        Rigidbody rb = b.AddComponent<Rigidbody>();
+        rb.useGravity = false;
+        rb.velocity = (target - b.transform.position).normalized * bulletSpeed;
+        Destroy(b, 1f);
+    }
+
+    private void TryReload()
+    {
+        if (isReloading || CurrentAmmo >= magazineSize || reserveAmmo <= 0) return;
+        StartCoroutine(ReloadRoutine());
+    }
+
+    private IEnumerator ReloadRoutine()
+    {
+        isReloading = true;
+        SetTrigger("reload");
+        yield return new WaitForSeconds(reloadTime);
+
+        int take = Mathf.Min(magazineSize - CurrentAmmo, reserveAmmo);
+        CurrentAmmo += take;
+        reserveAmmo -= take;
+        isReloading = false;
     }
 
     public void TakeDamage(float damage)
     {
-        hp -= damage;
-        if (hp <= 0) hp = 0;
+        if (IsDead) return;
+        Hp = Mathf.Max(0f, Hp - damage);
+        SetTrigger("hit");
+        if (Hp <= 0f) Die();
+    }
+
+    private void Die()
+    {
+        IsDead = true;
+        SetTrigger("die");
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+        // ponytail: 씬 리로드로 재시작. 게임오버 UI/체크포인트 필요하면 별도 GameManager로.
+        StartCoroutine(RestartAfter(3f));
+    }
+
+    private IEnumerator RestartAfter(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    private void UpdateAnimator()
+    {
+        if (animator == null) return;
+        Vector3 hv = controller.velocity; hv.y = 0f;
+        animator.SetFloat("moveSpeed", hv.magnitude);
+        animator.SetBool("isGrounded", isGrounded);
+        animator.SetBool("isCrouching", isCrouching);
+        animator.SetBool("isSprinting", isSprinting);
+        animator.SetBool("isRolling", isRolling);
+    }
+
+    private void SetTrigger(string n) { if (animator != null) animator.SetTrigger(n); }
+    private void SetBool(string n, bool v) { if (animator != null) animator.SetBool(n, v); }
+    private void SetInt(string n, int v) { if (animator != null) animator.SetInteger(n, v); }
+
+    private void UpdateUI()
+    {
+        if (hpText != null) hpText.text = $"HP {Hp:0}";
+        if (ammoText != null) ammoText.text = isReloading ? "재장전..." : $"AMMO {CurrentAmmo} / {reserveAmmo}";
+        if (staminaText != null) staminaText.text = $"STA {Stamina:0}";
     }
 }

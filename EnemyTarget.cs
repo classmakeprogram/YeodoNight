@@ -1,35 +1,61 @@
 using UnityEngine;
 
+/// <summary>
+/// 적 체력 / 사망 처리. 적 프리팹 루트에 부착한다.
+/// 부위 판정은 자식 콜라이더의 Hitbox가 담당하고, 이 스크립트로 데미지를 모은다.
+/// </summary>
 public class EnemyTarget : MonoBehaviour
 {
-    [Header("Enemy Stats")]
-    public float hp = 80f;             
-    public bool isHiddenEnemy = false;  
-    private bool isDead = false;
+    [Header("스탯")]
+    [Tooltip("스테이지 1~2 기준 체력. 스테이지 3부터 MissionManager가 보너스 체력을 더한다.")]
+    public float baseHp = 80f;
+    public bool isHiddenEnemy = false;
+
+    [Header("사망")]
+    [Tooltip("사망 애니메이션 재생 시간(초). 0이면 즉시 제거.")]
+    public float deathDelay = 0f;
+
+    public float Hp { get; private set; }
+    private bool isDead;
+    private Animator anim;
+
+    private void Awake()
+    {
+        anim = GetComponent<Animator>();
+    }
 
     private void Start()
     {
-        if (MissionManager.Instance != null && MissionManager.Instance.currentStage >= 3)
-        {
-            hp += MissionManager.Instance.currentEnemyHpModifier;
-        }
+        Hp = baseHp;
+        if (MissionManager.Instance != null)
+            Hp += MissionManager.Instance.currentEnemyHpModifier;
     }
 
-    public void TakeDamage(float damage, bool isHeadshot, bool isHidden)
+    public void TakeDamage(float damage, bool isHeadshot)
     {
         if (isDead) return;
 
-        hp -= damage;
-        if (hp <= 0) Die(isHeadshot, isHidden);
+        Hp -= damage;
+        if (anim != null) anim.SetTrigger("hit");
+
+        if (Hp <= 0f) Die(isHeadshot);
     }
 
-    private void Die(bool isHeadshot, bool isHidden)
+    private void Die(bool isHeadshot)
     {
         isDead = true;
+
+        RobotEnemyAI ai = GetComponent<RobotEnemyAI>();
+        if (ai != null) ai.OnDeath();
+
+        foreach (Collider c in GetComponentsInChildren<Collider>())
+            c.enabled = false;
+
+        if (anim != null) anim.SetTrigger("die");
+
         if (MissionManager.Instance != null)
-        {
-            MissionManager.Instance.OnEnemyKilled(isHeadshot, isHidden || isHiddenEnemy);
-        }
-        Destroy(gameObject); 
+            MissionManager.Instance.OnEnemyKilled(isHeadshot, isHiddenEnemy);
+
+        Destroy(gameObject, deathDelay);
     }
 }

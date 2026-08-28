@@ -1,78 +1,87 @@
-using UnityEngine;
 using System.Collections.Generic;
+using UnityEngine;
 
+/// <summary>
+/// 스테이지 시작 시 일반 적 + 숨겨진 적 1명을 스폰한다.
+/// 일반 적 수 = baseEnemyCount + (stage-1) * enemiesPerStage.
+/// </summary>
 public class EnemySpawner : MonoBehaviour
 {
     public static EnemySpawner Instance;
 
-    [Header("Enemy Prefabs")]
-    public GameObject enemyPrefab;          
-    public GameObject hiddenEnemyPrefab;    
+    [Header("프리팹")]
+    public GameObject enemyPrefab;
+    public GameObject hiddenEnemyPrefab;
 
-    [Header("Spawn Locations")]
-    public Transform[] normalSpawnPoints;   
-    public Transform hiddenSpawnPoint;      
+    [Header("스폰 위치")]
+    public Transform[] normalSpawnPoints;
+    public Transform hiddenSpawnPoint;
 
-    [Header("Spawn Settings")]
-    public int totalEnemiesToSpawn = 6;     
-    private List<GameObject> activeEnemies = new List<GameObject>();
+    [Header("스폰 수")]
+    public int baseEnemyCount = 5;
+    public int enemiesPerStage = 1;
+
+    private readonly List<GameObject> active = new List<GameObject>();
 
     private void Awake()
     {
         if (Instance == null) Instance = this;
+        else { Destroy(gameObject); return; }
     }
 
     private void Start()
     {
-        SpawnStageEnemies();
+        SpawnStageEnemies(1);
     }
 
-    public void SpawnStageEnemies()
+    public void SpawnStageEnemies(int stage)
     {
-        ClearActiveEnemies();
+        ClearActive();
 
-        // 1. 일반 적 스폰
+        int count = baseEnemyCount + Mathf.Max(0, stage - 1) * enemiesPerStage;
+
         if (enemyPrefab != null && normalSpawnPoints.Length > 0)
         {
-            for (int i = 0; i < totalEnemiesToSpawn; i++)
+            List<Transform> points = Shuffled(normalSpawnPoints);
+            for (int i = 0; i < count; i++)
             {
-                Transform spawnPoint = normalSpawnPoints[i % normalSpawnPoints.Length];
-                GameObject enemy = Instantiate(enemyPrefab, spawnPoint.position, spawnPoint.rotation);
-                enemy.tag = "Enemy";
-                activeEnemies.Add(enemy);
+                Transform p = points[i % points.Count];
+                GameObject e = Instantiate(enemyPrefab, p.position, p.rotation);
+                e.tag = "Enemy";
+                active.Add(e);
             }
         }
 
-        // 2. 숨겨진 적 스폰
         if (hiddenEnemyPrefab != null && hiddenSpawnPoint != null)
         {
-            GameObject hiddenEnemy = Instantiate(hiddenEnemyPrefab, hiddenSpawnPoint.position, hiddenSpawnPoint.rotation);
-            hiddenEnemy.tag = "HiddenEnemy";
+            GameObject h = Instantiate(hiddenEnemyPrefab, hiddenSpawnPoint.position, hiddenSpawnPoint.rotation);
+            h.tag = "HiddenEnemy";
 
-            EnemyTarget target = hiddenEnemy.GetComponent<EnemyTarget>();
-            if (target != null)
-            {
-                target.isHiddenEnemy = true;
-            }
+            EnemyTarget t = h.GetComponent<EnemyTarget>();
+            if (t != null) t.isHiddenEnemy = true;
 
-            activeEnemies.Add(hiddenEnemy);
+            active.Add(h);
         }
     }
 
-    public void ResetSpawnerForNextStage()
+    // Fisher-Yates. 스폰 포인트가 적 수보다 적으면 순환하므로 겹칠 수 있다.
+    private List<Transform> Shuffled(Transform[] src)
     {
-        SpawnStageEnemies();
-    }
-
-    private void ClearActiveEnemies()
-    {
-        foreach (GameObject enemy in activeEnemies)
+        List<Transform> list = new List<Transform>(src);
+        for (int i = list.Count - 1; i > 0; i--)
         {
-            if (enemy != null)
-            {
-                Destroy(enemy);
-            }
+            int j = Random.Range(0, i + 1);
+            Transform tmp = list[i];
+            list[i] = list[j];
+            list[j] = tmp;
         }
-        activeEnemies.Clear();
+        return list;
+    }
+
+    private void ClearActive()
+    {
+        foreach (GameObject e in active)
+            if (e != null) Destroy(e);
+        active.Clear();
     }
 }
