@@ -31,7 +31,8 @@ public class EnemyProjectile : MonoBehaviour
 
     private void OnTriggerEnter(Collider other)
     {
-        if (other.CompareTag("Enemy") || other.CompareTag("HiddenEnemy")) return;
+        Transform root = other.transform.root;
+        if (root.CompareTag("Enemy") || root.CompareTag("HiddenEnemy")) return;
 
         PlayerController player = other.GetComponentInParent<PlayerController>();
         if (player != null) player.TakeDamage(damage);

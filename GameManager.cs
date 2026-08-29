@@ -132,6 +132,7 @@ public class GameManager : MonoBehaviour
         Show(pausePanel, false);
         Show(cleared ? clearPanel : gameOverPanel, true);
 
+        if (EnemySpawner.Instance != null) EnemySpawner.Instance.EndRun();
         if (ScoreManager.Instance != null) ScoreManager.Instance.FinalizeRun();
         StartCoroutine(ReturnAfter(resultReturnDelay));
     }

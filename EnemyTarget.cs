@@ -56,10 +56,10 @@ public class EnemyTarget : MonoBehaviour
 
         if (anim != null) anim.SetTrigger("die");
 
-        if (MissionManager.Instance != null)
-            MissionManager.Instance.OnEnemyKilled(isHeadshot, isHiddenEnemy);
         if (ScoreManager.Instance != null)
             ScoreManager.Instance.AddKill(isHeadshot, isHiddenEnemy);
+        if (MissionManager.Instance != null)
+            MissionManager.Instance.OnEnemyKilled(isHeadshot, isHiddenEnemy);
         if (EnemySpawner.Instance != null)
             EnemySpawner.Instance.NotifyEnemyKilled();
 

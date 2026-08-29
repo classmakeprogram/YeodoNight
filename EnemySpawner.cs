@@ -56,7 +56,6 @@ public class EnemySpawner : MonoBehaviour
     {
         runActive = true;
         currentWave = 0;
-        ClearActive();
 
         if (mode == SpawnMode.Waves)
         {
@@ -67,6 +66,13 @@ public class EnemySpawner : MonoBehaviour
             int stage = MissionManager.Instance != null ? MissionManager.Instance.currentStage : 1;
             SpawnStageEnemies(stage);
         }
+    }
+
+    /// <summary>런 종료. GameManager.EndRun()이 호출한다. 예약된 다음 웨이브 스폰을 취소한다.</summary>
+    public void EndRun()
+    {
+        runActive = false;
+        CancelInvoke(nameof(NextWave));
     }
 
     // ---------- 미션 모드 ----------
