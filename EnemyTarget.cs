@@ -27,7 +27,11 @@ public class EnemyTarget : MonoBehaviour
     private void Start()
     {
         Hp = baseHp;
-        if (MissionManager.Instance != null)
+        // 미션 체력 보정은 Mission 모드에서만. Waves 모드는 스포너가 hpPerWave로 보정하므로
+        // MissionManager가 씬에 남아 있어도 이중 적용되지 않도록 막는다.
+        bool wavesMode = EnemySpawner.Instance != null
+            && EnemySpawner.Instance.mode == EnemySpawner.SpawnMode.Waves;
+        if (!wavesMode && MissionManager.Instance != null)
             Hp += MissionManager.Instance.currentEnemyHpModifier;
     }
 

@@ -98,13 +98,19 @@ public class PlayerController : MonoBehaviour
         Hp = maxHp;
         Stamina = staminaMax;
         CurrentAmmo = magazineSize;
+        // 태그는 Awake에서 설정한다. 적 AI가 Start에서 "Player" 태그로 플레이어를 찾으므로,
+        // 모든 Start보다 먼저 실행되는 Awake에서 세팅해야 스폰 순서와 무관하게 안전하다.
+        if (!CompareTag("Player")) gameObject.tag = "Player";
     }
 
     private void Start()
     {
-        if (!CompareTag("Player")) gameObject.tag = "Player";
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+        // GameManager가 커서를 관리하면 건드리지 않는다(타이틀/일시정지에서 커서가 보여야 함).
+        if (GameManager.Instance == null)
+        {
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
         EquipWeapon(WeaponType.AK47);
     }
 
@@ -233,6 +239,8 @@ public class PlayerController : MonoBehaviour
         }
         SetBool("isAiming", ads);
 
+        if (playerCam == null) return; // 조준/사격은 카메라 없이는 불가
+
         if (currentWeapon == WeaponType.AK47)
         {
             if (Input.GetKeyDown(KeyCode.R)) TryReload();
@@ -348,6 +356,7 @@ public class PlayerController : MonoBehaviour
     private void Die()
     {
         IsDead = true;
+        StopAllCoroutines(); // 진행 중이던 구르기/재장전/카타나 코루틴 중단 (시체가 미끄러지지 않도록)
         SetTrigger("die");
 
         if (GameManager.Instance != null)
