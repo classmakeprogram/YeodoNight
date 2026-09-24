@@ -139,11 +139,45 @@ public class EnemySpawner : MonoBehaviour
     /// <summary>EnemyTarget이 사망 시 호출. 웨이브 모드에서 전멸하면 다음 웨이브 예약.</summary>
     public void NotifyEnemyKilled()
     {
-        if (mode != SpawnMode.Waves || !runActive) return;
+        if (!runActive) return;
 
-        aliveCount--;
-        if (aliveCount <= 0 && !IsInvoking(nameof(NextWave)))
-            Invoke(nameof(NextWave), timeBetweenWaves);
+        aliveCount = Mathf.Max(0, aliveCount - 1);
+
+        // 웨이브 모드는 전멸 시 다음 웨이브 예약. 미션 모드는 MissionManager가 보충 스폰을 판단한다.
+        if (mode == SpawnMode.Waves)
+        {
+            if (aliveCount <= 0 && !IsInvoking(nameof(NextWave)))
+                Invoke(nameof(NextWave), timeBetweenWaves);
+        }
+    }
+
+    /// <summary>
+    /// 미션 모드에서 적이 전멸했는데 스테이지가 아직 안 끝났으면 일반 적을 보충 스폰한다.
+    /// (적 수가 부족해 미션을 못 깨고 진행이 멈추는 소프트락 방지)
+    /// </summary>
+    public void EnsureEnemiesAlive()
+    {
+        if (mode != SpawnMode.Mission || !runActive) return;
+        if (aliveCount > 0) return;
+        if (enemyPrefab == null || normalSpawnPoints.Length == 0) return;
+
+        SpawnReinforcements(Mathf.Max(3, enemiesPerStage + 2));
+    }
+
+    /// <summary>일반 적 보충 스폰. Mission 모드에서 적이 부족할 때 사용한다.</summary>
+    public void SpawnReinforcements(int count)
+    {
+        if (count <= 0 || enemyPrefab == null || normalSpawnPoints.Length == 0) return;
+
+        List<Transform> points = Shuffled(normalSpawnPoints);
+        for (int i = 0; i < count; i++)
+        {
+            Transform p = points[i % points.Count];
+            GameObject e = Instantiate(enemyPrefab, p.position, p.rotation);
+            e.tag = "Enemy";
+            active.Add(e);
+        }
+        aliveCount += count;
     }
 
     // ---------- 공용 ----------

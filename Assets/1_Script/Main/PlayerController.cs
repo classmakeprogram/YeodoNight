@@ -1,283 +1,435 @@
-using UnityEngine;
-using UnityEngine.UI;
 using System.Collections;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
+/// <summary>
+/// í”Œë ˆì´ì–´ ì´ë™ / ì‹œì  / ìŠ¤íƒœë¯¸ë„ˆ / AK-47 / ì¹´íƒ€ë‚˜ / ì¡°ì¤€ / ì‚¬ë§ ì²˜ë¦¬.
+/// ì• ë‹ˆë©”ì´ì…˜ì€ animator í•„ë“œê°€ ì—°ê²°ëœ ê²½ìš°ì—ë§Œ íŒŒë¼ë¯¸í„°ë¥¼ ì„¸íŒ…í•œë‹¤(ì—†ì–´ë„ ë™ì‘).
+/// </summary>
 [RequireComponent(typeof(CharacterController))]
 public class PlayerController : MonoBehaviour
 {
-    [Header("Movement Settings")]
+    public enum WeaponType { AK47 = 0, Katana = 1 }
+
+    [Header("ì´ë™")]
     public float walkSpeed = 5f;
-    public float runSpeed = 8f;
+    public float sprintSpeed = 8f;
     public float crouchSpeed = 2.5f;
     public float jumpForce = 5f;
-    public float rollForce = 15f;
-    public float crouchHeight = 1.0f;
-    public float standHeight = 2.0f;
+    public float rollSpeed = 12f;
+    public float rollDuration = 0.4f;
+    public float standHeight = 2f;
+    public float crouchHeight = 1f;
 
-    private CharacterController controller;
-    private Vector3 velocity;
-    private bool isGrounded;
-    private bool isCrouching = false;
+    [Header("ìŠ¤íƒœë¯¸ë„ˆ")]
+    public float staminaMax = 100f;
+    public float sprintDrainPerSec = 20f;
+    public float rollCost = 25f;
+    public float staminaRegenPerSec = 15f;
+    public float staminaRegenDelay = 1f;
 
-    [Header("Mouse Look (½Ã¾ß Á¶Àı)")]
-    public float mouseSensitivity = 150f; // ¸¶¿ì½º °¨µµ
-    private float xRotation = 0f;         // À§¾Æ·¡ È¸Àü °ª ÀúÀå
+    [Header("ë§ˆìš°ìŠ¤")]
+    public float mouseSensitivity = 150f;
 
-    [Header("AK-47 Gun & Bullet Settings")]
-    public int currentAmmo = 30;
-    public int maxAmmo = 120;
-    public bool isReloading = false;
-    [SerializeField] private float fireRate = 0.1f;
-    [SerializeField] private float range = 100f;
-    private float nextFireTime = 0f;
-    public float bulletSpeed = 40f;      // ¹ß»çµÇ´Â ÃÑ¾Ë ¼Óµµ
+    [Header("AK-47")]
+    public int magazineSize = 30;
+    public int reserveAmmo = 90;
+    public int maxReserveAmmo = 180;
+    public float akDamage = 25f;
+    public float fireRate = 0.1f;
+    public float range = 100f;
+    public float reloadTime = 2.5f;
+    public float bulletSpeed = 40f;
 
-    [Header("Katana & Weapon Swap")]
+    [Header("ì¹´íƒ€ë‚˜")]
+    public float katanaDamage = 40f;
+    public float katanaRange = 3f;
+    public float katanaCooldown = 0.5f;
+
+    [Header("ë¬´ê¸° ì˜¤ë¸Œì íŠ¸")]
     public GameObject akObject;
     public GameObject katanaObject;
     public TrailRenderer katanaTrail;
-    private const float KATANA_DAMAGE = 40.0f;
-    private bool isAttacking = false;
-    private enum WeaponType { AK47, Katana }
-    private WeaponType currentWeapon = WeaponType.AK47;
 
-    [Header("UI & Camera Zoom")]
+    [Header("ì¡°ì¤€ / ì¹´ë©”ë¼")]
     public Camera playerCam;
+    public float defaultFOV = 60f;
+    public float adsFOV = 40f;
+    public float zoomSpeed = 10f;
+
+    [Header("UI")]
     public Text hpText;
     public Text ammoText;
-    public float hp = 100f;
-    private float defaultFOV = 60f;
-    private float zoomFOV = 40f;
-    private float zoomSpeed = 10f;
+    public Text staminaText;
 
-    void Start()
+    [Header("ìŠ¤íƒ¯")]
+    public float maxHp = 100f;
+
+    [Header("ì• ë‹ˆë©”ì´ì…˜ (ì„ íƒ)")]
+    public Animator animator;
+
+    // --- ëŸ°íƒ€ì„ ìƒíƒœ (ì½ê¸° ì „ìš© ë…¸ì¶œ) ---
+    public float Hp { get; private set; }
+    public float Stamina { get; private set; }
+    public int CurrentAmmo { get; private set; }
+    public bool IsDead { get; private set; }
+
+    private CharacterController controller;
+    private Vector3 velocity;
+    private float xRotation;
+    private bool isGrounded;
+    private bool isCrouching;
+    private bool isSprinting;
+    private bool isReloading;
+    private bool isRolling;
+    private bool isAttacking;
+    private float lastStaminaUseTime;
+    private float nextFireTime;
+    private float nextKatanaTime;
+    private WeaponType currentWeapon = WeaponType.AK47;
+
+    // íŠ¸ë ˆì´ì„œìš© ê³µìœ  ë¨¸í‹°ë¦¬ì–¼ 1ê°œë§Œ ìƒì„±. ì´í™íŠ¸íŒ€ ë¨¸ì¦/íŠ¸ë ˆì´ì„œ ì—ì…‹ ë‚˜ì˜¤ë©´ SpawnTracer êµì²´.
+    private static Material s_tracerMat;
+    private SimplePool tracerPool;
+    private const float TracerLifetime = 1f;
+
+    private void Awake()
     {
-        gameObject.tag = "Player";
         controller = GetComponent<CharacterController>();
+        Hp = maxHp;
+        Stamina = staminaMax;
+        CurrentAmmo = magazineSize;
+        // íƒœê·¸ëŠ” Awakeì—ì„œ ì„¤ì •í•œë‹¤. ì  AIê°€ Startì—ì„œ "Player" íƒœê·¸ë¡œ í”Œë ˆì´ì–´ë¥¼ ì°¾ìœ¼ë¯€ë¡œ,
+        // ëª¨ë“  Startë³´ë‹¤ ë¨¼ì € ì‹¤í–‰ë˜ëŠ” Awakeì—ì„œ ì„¸íŒ…í•´ì•¼ ìŠ¤í° ìˆœì„œì™€ ë¬´ê´€í•˜ê²Œ ì•ˆì „í•˜ë‹¤.
+        if (!CompareTag("Player")) gameObject.tag = "Player";
 
-        // ¸¶¿ì½º Ä¿¼­¸¦ °ÔÀÓ È­¸é Áß¾Ó¿¡ °íÁ¤ÇÏ°í ¼û±é´Ï´Ù.
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
+        // íŠ¸ë ˆì´ì„œ í’€: ìŠ¤í”¼ì–´ 1ê°œë¥¼ í…œí”Œë¦¿ìœ¼ë¡œ ë§Œë“¤ì–´ ë§¤ ë°œì‚¬ë§ˆë‹¤ ì¬ì‚¬ìš©í•œë‹¤(GC ì ˆê°).
+        if (s_tracerMat == null)
+            s_tracerMat = new Material(Shader.Find("Unlit/Color")) { color = Color.yellow };
 
-        SwapTo(WeaponType.AK47);
+        GameObject tracerTemplate = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        tracerTemplate.name = "TracerTemplate";
+        tracerTemplate.transform.SetParent(transform, false);
+        tracerTemplate.transform.localScale = Vector3.one * 0.05f;
+        Collider tracerCol = tracerTemplate.GetComponent<Collider>();
+        if (tracerCol != null) tracerCol.enabled = false;
+        tracerTemplate.GetComponent<Renderer>().sharedMaterial = s_tracerMat;
+        Rigidbody tracerRb = tracerTemplate.AddComponent<Rigidbody>();
+        tracerRb.useGravity = false;
+        tracerTemplate.AddComponent<PooledObject>();
+        tracerTemplate.SetActive(false);
+        tracerPool = new SimplePool(tracerTemplate, null, 8);
     }
 
-    void Update()
+    private void Start()
     {
-        HandleMouseLook();   // ¸¶¿ì½º ½Ã¾ß È¸Àü Ã³¸®
-        HandleMovement();    // Å°º¸µå ÀÌµ¿ Ã³¸®
-        HandleWeaponSwap();  // ¹«±â ±³Ã¼ Ã³¸®
-        HandleCombat();      // ÀüÅõ ¹× ¹ß»ç Ã³¸®
-        UpdateUI();          // UI ¾÷µ¥ÀÌÆ®
+        // GameManagerê°€ ì»¤ì„œë¥¼ ê´€ë¦¬í•˜ë©´ ê±´ë“œë¦¬ì§€ ì•ŠëŠ”ë‹¤(íƒ€ì´í‹€/ì¼ì‹œì •ì§€ì—ì„œ ì»¤ì„œê°€ ë³´ì—¬ì•¼ í•¨).
+        if (GameManager.Instance == null)
+        {
+            Cursor.lockState = CursorLockMode.Locked;
+            Cursor.visible = false;
+        }
+        EquipWeapon(WeaponType.AK47);
     }
 
-    void HandleMouseLook()
+    private void Update()
+    {
+        if (IsDead) return;
+        if (GameManager.Instance != null && !GameManager.Instance.IsPlaying) return;
+        HandleMouseLook();
+        HandleMovement();
+        HandleStamina();
+        HandleWeaponSwap();
+        HandleCombat();
+        UpdateAnimator();
+        UpdateUI();
+    }
+
+    private void HandleMouseLook()
     {
         if (playerCam == null) return;
-
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity * Time.deltaTime;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity * Time.deltaTime;
-
-        xRotation -= mouseY;
-        xRotation = Mathf.Clamp(xRotation, -85f, 85f); // À§¾Æ·¡ È¸Àü Á¦ÇÑ
-
+        float mx = Input.GetAxis("Mouse X") * mouseSensitivity * Time.deltaTime;
+        float my = Input.GetAxis("Mouse Y") * mouseSensitivity * Time.deltaTime;
+        xRotation = Mathf.Clamp(xRotation - my, -85f, 85f);
         playerCam.transform.localRotation = Quaternion.Euler(xRotation, 0f, 0f);
-        transform.Rotate(Vector3.up * mouseX); // ÁÂ¿ì È¸Àü
+        transform.Rotate(Vector3.up * mx);
     }
 
-    void HandleMovement()
+    private void HandleMovement()
     {
         isGrounded = controller.isGrounded;
-        if (isGrounded && velocity.y < 0) velocity.y = -2f;
+        if (isGrounded && velocity.y < 0f) velocity.y = -2f;
 
         float x = Input.GetAxis("Horizontal");
         float z = Input.GetAxis("Vertical");
+        Vector3 input = (transform.right * x + transform.forward * z);
+        if (input.sqrMagnitude > 1f) input.Normalize();
 
-        float currentSpeed = walkSpeed;
-        if (Input.GetKey(KeyCode.LeftShift) && !isCrouching) currentSpeed = runSpeed;
-        else if (isCrouching) currentSpeed = crouchSpeed;
+        bool wantsSprint = Input.GetKey(KeyCode.LeftShift) && !isCrouching && z > 0.1f && Stamina > 0f;
+        isSprinting = wantsSprint && !isRolling;
 
-        Vector3 move = transform.right * x + transform.forward * z;
-        controller.Move(move * currentSpeed * Time.deltaTime);
+        float speed = isCrouching ? crouchSpeed : (isSprinting ? sprintSpeed : walkSpeed);
+        if (!isRolling)
+            controller.Move(input * speed * Time.deltaTime);
 
-        if (Input.GetButtonDown("Jump") && isGrounded)
+        if (Input.GetButtonDown("Jump") && isGrounded && !isCrouching && !isRolling)
         {
             velocity.y = Mathf.Sqrt(jumpForce * -2f * Physics.gravity.y);
+            SetTrigger("jump");
+        }
+
+        if (Input.GetKeyDown(KeyCode.C) && !isRolling)
+            SetCrouch(!isCrouching);
+
+        if (Input.GetKeyDown(KeyCode.Q) && isGrounded && !isRolling && Stamina >= rollCost)
+        {
+            Vector3 dir = input.sqrMagnitude > 0.01f ? input.normalized : transform.forward;
+            StartCoroutine(RollRoutine(dir));
         }
 
         velocity.y += Physics.gravity.y * Time.deltaTime;
         controller.Move(velocity * Time.deltaTime);
+    }
 
-        if (Input.GetKeyDown(KeyCode.C))
-        {
-            isCrouching = !isCrouching;
-            controller.height = isCrouching ? crouchHeight : standHeight;
-        }
+    private IEnumerator RollRoutine(Vector3 dir)
+    {
+        isRolling = true;
+        UseStamina(rollCost);
+        SetTrigger("roll");
+        if (isCrouching) SetCrouch(false);
 
-        if (Input.GetKeyDown(KeyCode.LeftControl) && isGrounded)
+        float t = 0f;
+        while (t < rollDuration)
         {
-            Vector3 rollDir = transform.forward * rollForce;
-            controller.Move(rollDir * Time.deltaTime * 5f);
+            controller.Move(dir * rollSpeed * Time.deltaTime); // ìˆ˜ì§ ì´ë™ì€ HandleMovementê°€ ê³„ì† ì²˜ë¦¬
+            t += Time.deltaTime;
+            yield return null;
         }
+        isRolling = false;
+    }
+
+    private void SetCrouch(bool value)
+    {
+        isCrouching = value;
+        controller.height = value ? crouchHeight : standHeight;
+        controller.center = new Vector3(0f, controller.height * 0.5f, 0f);
+    }
+
+    private void HandleStamina()
+    {
+        if (isSprinting)
+            UseStamina(sprintDrainPerSec * Time.deltaTime);
+        else if (Time.time - lastStaminaUseTime >= staminaRegenDelay)
+            Stamina = Mathf.Min(staminaMax, Stamina + staminaRegenPerSec * Time.deltaTime);
+    }
+
+    private void UseStamina(float amount)
+    {
+        Stamina = Mathf.Max(0f, Stamina - amount);
+        lastStaminaUseTime = Time.time;
     }
 
     private void HandleWeaponSwap()
     {
-        if (Input.GetKeyDown(KeyCode.Alpha1)) SwapTo(WeaponType.AK47);
-        if (Input.GetKeyDown(KeyCode.Alpha2)) SwapTo(WeaponType.Katana);
+        if (Input.GetKeyDown(KeyCode.Alpha1)) { EquipWeapon(WeaponType.AK47); return; }
+        if (Input.GetKeyDown(KeyCode.Alpha2)) { EquipWeapon(WeaponType.Katana); return; }
+
+        float scroll = Input.GetAxis("Mouse ScrollWheel");
+        if (Mathf.Abs(scroll) > 0.01f)
+            EquipWeapon(currentWeapon == WeaponType.AK47 ? WeaponType.Katana : WeaponType.AK47);
     }
 
-    private void SwapTo(WeaponType type)
+    private void EquipWeapon(WeaponType type)
     {
         currentWeapon = type;
         if (akObject != null) akObject.SetActive(type == WeaponType.AK47);
         if (katanaObject != null) katanaObject.SetActive(type == WeaponType.Katana);
+        SetInt("weapon", (int)type);
     }
 
-    void HandleCombat()
+    private void HandleCombat()
     {
-        bool isAttackTriggered = Input.GetButton("Fire1") || (Input.GetKey(KeyCode.LeftShift) && Input.GetMouseButton(0));
+        bool ads = currentWeapon == WeaponType.AK47 && Input.GetMouseButton(1) && !isReloading;
+        if (playerCam != null)
+        {
+            float targetFOV = ads ? adsFOV : defaultFOV;
+            playerCam.fieldOfView = Mathf.Lerp(playerCam.fieldOfView, targetFOV, Time.deltaTime * zoomSpeed);
+        }
+        SetBool("isAiming", ads);
+
+        if (playerCam == null) return; // ì¡°ì¤€/ì‚¬ê²©ì€ ì¹´ë©”ë¼ ì—†ì´ëŠ” ë¶ˆê°€
 
         if (currentWeapon == WeaponType.AK47)
         {
-            if (!isReloading)
-            {
-                if (isAttackTriggered && Time.time >= nextFireTime)
-                {
-                    if (currentAmmo > 0) ShootAK47();
-                    else StartCoroutine(ReloadRoutine());
-                }
-            }
+            if (Input.GetKeyDown(KeyCode.R)) TryReload();
 
-            if (Input.GetKeyDown(KeyCode.R) && currentAmmo < 30 && !isReloading)
+            if (Input.GetMouseButton(0) && !isReloading && Time.time >= nextFireTime)
             {
-                StartCoroutine(ReloadRoutine());
+                if (CurrentAmmo > 0) ShootAK47();
+                else TryReload();
             }
-
-            if (Input.GetMouseButton(1))
-                playerCam.fieldOfView = Mathf.Lerp(playerCam.fieldOfView, zoomFOV, Time.deltaTime * zoomSpeed);
-            else
-                playerCam.fieldOfView = Mathf.Lerp(playerCam.fieldOfView, defaultFOV, Time.deltaTime * zoomSpeed);
         }
-        else if (currentWeapon == WeaponType.Katana)
+        else // Katana
         {
-            bool isMeleeTriggered = Input.GetMouseButtonDown(0) || (Input.GetKey(KeyCode.LeftShift) && Input.GetMouseButtonDown(0));
-            if (isMeleeTriggered && !isAttacking) StartCoroutine(KatanaAttackRoutine());
+            if (Input.GetMouseButtonDown(0) && !isAttacking && Time.time >= nextKatanaTime)
+                StartCoroutine(KatanaAttackRoutine());
         }
     }
 
     private void ShootAK47()
     {
-        currentAmmo--;
+        CurrentAmmo--;
         nextFireTime = Time.time + fireRate;
+        SetTrigger("shoot");
 
-        RaycastHit hit;
-        Vector3 targetPoint = playerCam.transform.position + playerCam.transform.forward * range;
+        Vector3 origin = playerCam.transform.position;
+        Vector3 dir = playerCam.transform.forward;
+        Vector3 endPoint = origin + dir * range;
 
-        if (Physics.Raycast(playerCam.transform.position, playerCam.transform.forward, out hit, range))
+        if (Physics.Raycast(origin, dir, out RaycastHit hit, range, ~0, QueryTriggerInteraction.Ignore))
         {
-            targetPoint = hit.point;
-
-            // [¿¡·¯ ¹æÁö Àû¿ë] CompareTag ´ë½Å .tag ¹®ÀÚ¿­ ºñ±³¸¦ »ç¿ëÇÏ¿© ÅÂ±×°¡ ÇÁ·ÎÁ§Æ®¿¡ ¾ø¾îµµ »¸Áö ¾Êµµ·Ï ÇÔ
-            string targetTag = hit.collider.gameObject.tag;
-            if (targetTag == "Enemy" || targetTag == "HiddenEnemy")
-            {
-                EnemyTarget enemy = hit.transform.GetComponentInParent<EnemyTarget>();
-                bool isHidden = (targetTag == "HiddenEnemy");
-
-                if (enemy != null)
-                {
-                    // ¸Ó¸®(Head) ¸ÂÃèÀ» ¶§
-                    if (hit.collider.name == "Head")
-                    {
-                        enemy.TakeDamage(80f, true, isHidden);
-                        // [ÄÜ¼Ö Ãâ·Â Ãß°¡] »¡°£»öÀ¸·Î Çìµå¼¦ Á¤º¸ Ç¥½Ã
-                        Debug.Log($"<color=red><b>[HEADSHOT!]</b></color> ¹«±â: AK-47 | ´ë»ó: {hit.collider.transform.root.name} | µ¥¹ÌÁö: <b>80</b>");
-                    }
-                    // ¸öÅë ¸ÂÃèÀ» ¶§
-                    else
-                    {
-                        enemy.TakeDamage(25f, false, isHidden);
-                        // [ÄÜ¼Ö Ãâ·Â Ãß°¡] ÁÖÈ²»öÀ¸·Î ÀÏ¹İ °ø°İ Á¤º¸ Ç¥½Ã
-                        Debug.Log($"<color=orange>[BODY HIT]</color> ¹«±â: AK-47 | ´ë»ó: {hit.collider.transform.root.name} | µ¥¹ÌÁö: <b>25</b>");
-                    }
-                }
-            }
+            endPoint = hit.point;
+            ApplyHit(hit, akDamage);
         }
-
-        CreateVisualBullet(targetPoint);
-    }
-
-    private void CreateVisualBullet(Vector3 targetPosition)
-    {
-        GameObject bullet = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        bullet.name = "Temp_Bullet";
-        bullet.transform.position = akObject != null ? akObject.transform.position : playerCam.transform.position;
-        bullet.transform.localScale = new Vector3(0.08f, 0.08f, 0.2f);
-
-        Destroy(bullet.GetComponent<Collider>());
-
-        Renderer rend = bullet.GetComponent<Renderer>();
-        if (rend != null)
-        {
-            rend.material = new Material(Shader.Find("Unlit/Color"));
-            rend.material.color = Color.yellow;
-        }
-
-        Rigidbody rb = bullet.AddComponent<Rigidbody>();
-        rb.useGravity = false;
-        Vector3 direction = (targetPosition - bullet.transform.position).normalized;
-        rb.velocity = direction * bulletSpeed;
-
-        Destroy(bullet, 1.5f);
-    }
-
-    private IEnumerator ReloadRoutine()
-    {
-        isReloading = true;
-        yield return new WaitForSeconds(5.0f);
-        currentAmmo = 30;
-        isReloading = false;
+        SpawnTracer(endPoint);
     }
 
     private IEnumerator KatanaAttackRoutine()
     {
         isAttacking = true;
+        nextKatanaTime = Time.time + katanaCooldown;
+        SetTrigger("katanaAttack");
         if (katanaTrail != null) katanaTrail.emitting = true;
 
-        RaycastHit hit;
-        if (Physics.Raycast(playerCam.transform.position, playerCam.transform.forward, out hit, 3.0f))
-        {
-            string targetTag = hit.collider.gameObject.tag;
-            if (targetTag == "Enemy" || targetTag == "HiddenEnemy")
-            {
-                EnemyTarget enemy = hit.transform.GetComponentInParent<EnemyTarget>();
-                bool isHidden = (targetTag == "HiddenEnemy");
-
-                if (enemy != null)
-                {
-                    enemy.TakeDamage(KATANA_DAMAGE, false, isHidden);
-                    // [ÄÜ¼Ö Ãâ·Â Ãß°¡] ÇÏ´Ã»öÀ¸·Î Ä® °ø°İ Á¤º¸ Ç¥½Ã
-                    Debug.Log($"<color=cyan>[KATANA SWING]</color> ¹«±â: Ä«Å¸³ª | ´ë»ó: {hit.collider.transform.root.name} | µ¥¹ÌÁö: <b>40</b>");
-                }
-            }
-        }
+        Vector3 origin = playerCam.transform.position;
+        Vector3 dir = playerCam.transform.forward;
+        if (Physics.Raycast(origin, dir, out RaycastHit hit, katanaRange, ~0, QueryTriggerInteraction.Ignore))
+            ApplyHit(hit, katanaDamage);
 
         yield return new WaitForSeconds(0.3f);
         if (katanaTrail != null) katanaTrail.emitting = false;
-        yield return new WaitForSeconds(0.2f);
+        yield return new WaitForSeconds(0.1f);
         isAttacking = false;
     }
 
-    private void UpdateUI()
+    /// <summary>ë¶€ìœ„ ì½œë¼ì´ë”ë©´ Hitboxë¡œ, ì•„ë‹ˆë©´ ë£¨íŠ¸ EnemyTargetìœ¼ë¡œ ëª¸í†µ ë°ë¯¸ì§€.</summary>
+    private void ApplyHit(RaycastHit hit, float baseDamage)
     {
-        if (hpText != null) hpText.text = $"HP: {hp:0}";
-        if (ammoText != null) ammoText.text = isReloading ? "RELOADING..." : $"AMMO: {currentAmmo} / 30";
+        Hitbox box = hit.collider.GetComponent<Hitbox>();
+        if (box != null)
+        {
+            box.Receive(baseDamage);
+            return;
+        }
+        EnemyTarget enemy = hit.collider.GetComponentInParent<EnemyTarget>();
+        if (enemy != null) enemy.TakeDamage(baseDamage, false);
+    }
+
+    private void SpawnTracer(Vector3 target)
+    {
+        if (tracerPool == null) return;
+
+        Vector3 origin = akObject != null ? akObject.transform.position : playerCam.transform.position;
+        GameObject b = tracerPool.Get(origin, Quaternion.identity);
+
+        Rigidbody rb = b.GetComponent<Rigidbody>();
+        if (rb != null)
+        {
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.velocity = (target - origin).normalized * bulletSpeed;
+        }
+
+        PooledObject po = b.GetComponent<PooledObject>();
+        if (po != null) po.Arm(tracerPool, TracerLifetime);
+    }
+
+    private void TryReload()
+    {
+        if (isReloading || CurrentAmmo >= magazineSize || reserveAmmo <= 0) return;
+        StartCoroutine(ReloadRoutine());
+    }
+
+    private IEnumerator ReloadRoutine()
+    {
+        isReloading = true;
+        SetTrigger("reload");
+        yield return new WaitForSeconds(reloadTime);
+
+        int take = Mathf.Min(magazineSize - CurrentAmmo, reserveAmmo);
+        CurrentAmmo += take;
+        reserveAmmo -= take;
+        isReloading = false;
     }
 
     public void TakeDamage(float damage)
     {
-        hp -= damage;
-        if (hp <= 0) hp = 0;
+        if (IsDead) return;
+        Hp = Mathf.Max(0f, Hp - damage);
+        SetTrigger("hit");
+        if (Hp <= 0f) Die();
+    }
+
+    private void Die()
+    {
+        IsDead = true;
+        StopAllCoroutines(); // ì§„í–‰ ì¤‘ì´ë˜ êµ¬ë¥´ê¸°/ì¬ì¥ì „/ì¹´íƒ€ë‚˜ ì½”ë£¨í‹´ ì¤‘ë‹¨ (ì‹œì²´ê°€ ë¯¸ë„ëŸ¬ì§€ì§€ ì•Šë„ë¡)
+        SetTrigger("die");
+
+        if (GameManager.Instance != null)
+        {
+            GameManager.Instance.OnPlayerDied();
+            return;
+        }
+
+        // GameManager ì—†ëŠ” ë‹¨ë… í…ŒìŠ¤íŠ¸ìš© í´ë°±
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+        StartCoroutine(RestartAfter(3f));
+    }
+
+    /// <summary>íšŒë³µ ì•„ì´í…œ íšë“. ì²´ë ¥ì´ ì´ë¯¸ ìµœëŒ€ë©´ false(íšë“ ì•ˆ í•¨).</summary>
+    public bool AddHealth(float amount)
+    {
+        if (IsDead || Hp >= maxHp) return false;
+        Hp = Mathf.Min(maxHp, Hp + amount);
+        return true;
+    }
+
+    /// <summary>íƒ„ì•½ ì•„ì´í…œ íšë“. ì˜ˆë¹„íƒ„ì´ ì´ë¯¸ ìµœëŒ€ë©´ false(íšë“ ì•ˆ í•¨).</summary>
+    public bool AddAmmo(int amount)
+    {
+        if (reserveAmmo >= maxReserveAmmo) return false;
+        reserveAmmo = Mathf.Min(maxReserveAmmo, reserveAmmo + amount);
+        return true;
+    }
+
+    private IEnumerator RestartAfter(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    private void UpdateAnimator()
+    {
+        if (animator == null) return;
+        Vector3 hv = controller.velocity; hv.y = 0f;
+        animator.SetFloat("moveSpeed", hv.magnitude);
+        animator.SetBool("isGrounded", isGrounded);
+        animator.SetBool("isCrouching", isCrouching);
+        animator.SetBool("isSprinting", isSprinting);
+        animator.SetBool("isRolling", isRolling);
+    }
+
+    private void SetTrigger(string n) { if (animator != null) animator.SetTrigger(n); }
+    private void SetBool(string n, bool v) { if (animator != null) animator.SetBool(n, v); }
+    private void SetInt(string n, int v) { if (animator != null) animator.SetInteger(n, v); }
+
+    private void UpdateUI()
+    {
+        if (hpText != null) hpText.text = $"HP {Hp:0}";
+        if (ammoText != null) ammoText.text = isReloading ? "ì¬ì¥ì „..." : $"AMMO {CurrentAmmo} / {reserveAmmo}";
+        if (staminaText != null) staminaText.text = $"STA {Stamina:0}";
     }
 }
