@@ -17,6 +17,12 @@ public class RobotEnemyAI : MonoBehaviour
     public float detectRange = 25f;
     public float stopRange = 2f;
 
+    [Header("시야")]
+    [Tooltip("시야를 막는 레이어(레벨 지오메트리 등). 기본은 전 레이어.")]
+    public LayerMask obstacleMask = ~0;
+    [Tooltip("시야 기준점. 비우면 몸통 위쪽(1.5m)을 사용한다.")]
+    public Transform eye;
+
     [Header("공격")]
     public AttackStyle attackStyle = AttackStyle.Melee;
     public float attackDamage = 10f;      // 근접 데미지
@@ -68,8 +74,8 @@ public class RobotEnemyAI : MonoBehaviour
 
         float dist = Vector3.Distance(transform.position, player.position);
 
-        // ponytail: 시야 판정 없음(벽 너머도 인지). 엄폐물 레벨이면 Physics.Linecast로 obstacleMask 체크 추가.
-        if (dist > detectRange)
+        // 시야(LOS) 판정: 벽 등에 가려지면 인지하지 않는다. obstacleMask로 차단 레이어를 지정한다.
+        if (dist > detectRange || !HasLineOfSight())
         {
             agent.isStopped = true;
             isCrouching = false;
@@ -183,6 +189,32 @@ public class RobotEnemyAI : MonoBehaviour
         anim.SetBool("isRunning", isRunning);
         anim.SetBool("isMoving", agent.velocity.sqrMagnitude > 0.01f);
         anim.SetFloat("moveSpeed", agent.velocity.magnitude);
+    }
+
+    private static readonly RaycastHit[] s_losHits = new RaycastHit[8];
+
+    /// <summary>플레이어까지 시야가 트여 있는지(벽·장애물 차단) 판정한다.</summary>
+    private bool HasLineOfSight()
+    {
+        Vector3 origin = eye != null ? eye.position : transform.position + Vector3.up * 1.5f;
+        Vector3 targetPos = player.position + Vector3.up * 1f;
+        Vector3 dir = targetPos - origin;
+        float dist = dir.magnitude;
+        if (dist < 0.01f) return true;
+
+        int n = Physics.RaycastNonAlloc(origin, dir / dist, s_losHits, dist, obstacleMask, QueryTriggerInteraction.Ignore);
+
+        float nearest = float.MaxValue;
+        Transform nearestT = null;
+        for (int i = 0; i < n; i++)
+        {
+            RaycastHit h = s_losHits[i];
+            if (h.collider.transform.root == transform.root) continue; // 자기 몸은 제외
+            if (h.distance < nearest) { nearest = h.distance; nearestT = h.collider.transform; }
+        }
+
+        // 아무것도 안 맞았거나 가장 가까운 게 플레이어면 시야 확보. 벽이 먼저 맞으면 차단.
+        return nearestT == null || nearestT.root == player.root;
     }
 
     private void OnDrawGizmosSelected()

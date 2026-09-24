@@ -34,6 +34,7 @@ public class HUD : MonoBehaviour
     [Range(0f, 1f)] public float lowHpMaxAlpha = 0.6f;
 
     private float hitMarkerHideTime;
+    private SimplePool damageNumberPool;
 
     private void Awake()
     {
@@ -50,6 +51,10 @@ public class HUD : MonoBehaviour
         }
         if (cam == null) cam = Camera.main;
         if (hitMarker != null) hitMarker.enabled = false;
+
+        // 데미지 숫자 풀: 매 피격마다 Instantiate/Destroy하지 않고 재사용한다.
+        if (damageNumberPrefab != null && damageNumberParent != null)
+            damageNumberPool = new SimplePool(damageNumberPrefab.gameObject, damageNumberParent, 8);
     }
 
     private void Update()
@@ -92,14 +97,15 @@ public class HUD : MonoBehaviour
 
     private void SpawnDamageNumber(Vector3 worldPos, float damage, bool headshot)
     {
-        if (damageNumberPrefab == null || damageNumberParent == null || cam == null) return;
+        if (damageNumberPool == null || cam == null) return;
 
         Vector3 screenPos = cam.WorldToScreenPoint(worldPos);
         if (screenPos.z < 0f) return; // 카메라 뒤
 
-        Text t = Instantiate(damageNumberPrefab, damageNumberParent);
-        t.gameObject.SetActive(true);
-        t.transform.position = screenPos;
+        GameObject go = damageNumberPool.Get(screenPos, Quaternion.identity);
+        Text t = go.GetComponent<Text>();
+        if (t == null) { damageNumberPool.Release(go); return; }
+
         t.text = Mathf.RoundToInt(damage).ToString();
         t.color = headshot ? new Color(1f, 0.3f, 0.2f) : Color.white;
         t.fontSize = damageNumberPrefab.fontSize + (headshot ? 6 : 0);
@@ -121,6 +127,6 @@ public class HUD : MonoBehaviour
             t.color = c;
             yield return null;
         }
-        if (t != null) Destroy(t.gameObject);
+        if (t != null && damageNumberPool != null) damageNumberPool.Release(t.gameObject);
     }
 }

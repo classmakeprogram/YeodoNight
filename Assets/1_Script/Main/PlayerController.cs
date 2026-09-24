@@ -89,8 +89,10 @@ public class PlayerController : MonoBehaviour
     private float nextKatanaTime;
     private WeaponType currentWeapon = WeaponType.AK47;
 
-    // ponytail: 트레이서용 공유 머티리얼 1개만 생성. 이펙트팀 머즐/트레이서 에셋 나오면 SpawnTracer 교체.
+    // 트레이서용 공유 머티리얼 1개만 생성. 이펙트팀 머즐/트레이서 에셋 나오면 SpawnTracer 교체.
     private static Material s_tracerMat;
+    private SimplePool tracerPool;
+    private const float TracerLifetime = 1f;
 
     private void Awake()
     {
@@ -101,6 +103,23 @@ public class PlayerController : MonoBehaviour
         // 태그는 Awake에서 설정한다. 적 AI가 Start에서 "Player" 태그로 플레이어를 찾으므로,
         // 모든 Start보다 먼저 실행되는 Awake에서 세팅해야 스폰 순서와 무관하게 안전하다.
         if (!CompareTag("Player")) gameObject.tag = "Player";
+
+        // 트레이서 풀: 스피어 1개를 템플릿으로 만들어 매 발사마다 재사용한다(GC 절감).
+        if (s_tracerMat == null)
+            s_tracerMat = new Material(Shader.Find("Unlit/Color")) { color = Color.yellow };
+
+        GameObject tracerTemplate = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        tracerTemplate.name = "TracerTemplate";
+        tracerTemplate.transform.SetParent(transform, false);
+        tracerTemplate.transform.localScale = Vector3.one * 0.05f;
+        Collider tracerCol = tracerTemplate.GetComponent<Collider>();
+        if (tracerCol != null) tracerCol.enabled = false;
+        tracerTemplate.GetComponent<Renderer>().sharedMaterial = s_tracerMat;
+        Rigidbody tracerRb = tracerTemplate.AddComponent<Rigidbody>();
+        tracerRb.useGravity = false;
+        tracerTemplate.AddComponent<PooledObject>();
+        tracerTemplate.SetActive(false);
+        tracerPool = new SimplePool(tracerTemplate, null, 8);
     }
 
     private void Start()
@@ -309,22 +328,21 @@ public class PlayerController : MonoBehaviour
 
     private void SpawnTracer(Vector3 target)
     {
-        GameObject b = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        b.name = "Tracer";
-        Destroy(b.GetComponent<Collider>());
-        b.transform.localScale = Vector3.one * 0.05f;
-        b.transform.position = akObject != null ? akObject.transform.position : playerCam.transform.position;
+        if (tracerPool == null) return;
 
-        if (s_tracerMat == null)
+        Vector3 origin = akObject != null ? akObject.transform.position : playerCam.transform.position;
+        GameObject b = tracerPool.Get(origin, Quaternion.identity);
+
+        Rigidbody rb = b.GetComponent<Rigidbody>();
+        if (rb != null)
         {
-            s_tracerMat = new Material(Shader.Find("Unlit/Color")) { color = Color.yellow };
+            rb.velocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.velocity = (target - origin).normalized * bulletSpeed;
         }
-        b.GetComponent<Renderer>().sharedMaterial = s_tracerMat;
 
-        Rigidbody rb = b.AddComponent<Rigidbody>();
-        rb.useGravity = false;
-        rb.velocity = (target - b.transform.position).normalized * bulletSpeed;
-        Destroy(b, 1f);
+        PooledObject po = b.GetComponent<PooledObject>();
+        if (po != null) po.Arm(tracerPool, TracerLifetime);
     }
 
     private void TryReload()
