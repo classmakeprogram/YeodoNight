@@ -1,96 +1,187 @@
 using UnityEngine;
 using UnityEngine.AI;
 
+/// <summary>
+/// ë¡œë´‡ ì  AI. ê°ì§€ ë²”ìœ„ ì•ˆì— í”Œë ˆì´ì–´ê°€ ë“¤ì–´ì˜¤ë©´ ë°˜ì‘í•œë‹¤.
+///  - Melee : ë¶™ì–´ì„œ ê·¼ì ‘ ê³µê²©
+///  - Ranged: ì„ í˜¸ ì‚¬ê±°ë¦¬ë¥¼ ìœ ì§€í•˜ë©° íˆ¬ì‚¬ì²´ ë°œì‚¬(ë„ˆë¬´ ê°€ê¹Œìš°ë©´ í›„í‡´)
+/// ê±°ë¦¬/ìƒíƒœë¥¼ ì• ë‹ˆë©”ì´í„°ì— ì „ë‹¬í•œë‹¤.
+/// </summary>
 [RequireComponent(typeof(NavMeshAgent))]
 public class RobotEnemyAI : MonoBehaviour
 {
-    [Header("Enemy AI Settings")]
-    public float patrolSpeed = 3.5f;     
-    public float detectRange = 25f;      
-    public float stopRange = 2f;         
-    
-    private NavMeshAgent agent;
-    private Animator anim; // ÀÌÁ¦ ¾À¿¡ ¾Ö´Ï¸ŞÀÌÅÍ°¡ ¾ø¾îµµ ÅÍÁöÁö ¾Ê½À´Ï´Ù.
-    private Transform playerTransform;
+    public enum AttackStyle { Melee, Ranged }
 
-    private bool isCrouching = false;
-    private bool isRunning = false;
+    [Header("ì´ë™")]
+    public float moveSpeed = 3.5f;
+    public float detectRange = 25f;
+    public float stopRange = 2f;
+
+    [Header("ê³µê²©")]
+    public AttackStyle attackStyle = AttackStyle.Melee;
+    public float attackDamage = 10f;      // ê·¼ì ‘ ë°ë¯¸ì§€
+    public float attackRange = 2.5f;      // ê·¼ì ‘ ì‚¬ê±°ë¦¬
+    public float attackCooldown = 1.5f;
+
+    [Header("ì›ê±°ë¦¬ (attackStyle = Ranged)")]
+    public GameObject projectilePrefab;   // EnemyProjectile ì»´í¬ë„ŒíŠ¸ë¥¼ ê°€ì§„ í”„ë¦¬íŒ¹
+    public Transform muzzle;              // ë°œì‚¬ ìœ„ì¹˜. ì—†ìœ¼ë©´ ëª¸í†µ ìœ„ìª½
+    public float preferredRange = 12f;
+    public float projectileSpeed = 20f;
+    public float projectileDamage = 8f;
+
+    private NavMeshAgent agent;
+    private Animator anim;
+    private Transform player;
+    private PlayerController playerCtrl;
+    private float nextAttackTime;
+    private bool isCrouching;
+    private bool isRunning;
+    private bool isDead;
 
     private void Awake()
     {
-        gameObject.tag = "Enemy";
-        agent = GetComponent<NavMeshAgent>();
-        anim = GetComponent<Animator>(); // ÄÄÆ÷³ÍÆ®°¡ ¾øÀ¸¸é null Ã³¸®µÊ
+        if (!CompareTag("Enemy") && !CompareTag("HiddenEnemy"))
+            gameObject.tag = "Enemy";
 
-        agent.speed = patrolSpeed;
+        agent = GetComponent<NavMeshAgent>();
+        anim = GetComponent<Animator>();
+        agent.speed = moveSpeed;
         agent.stoppingDistance = stopRange;
     }
 
     private void Start()
     {
-        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
-        if (playerObj != null) playerTransform = playerObj.transform;
+        GameObject p = GameObject.FindGameObjectWithTag("Player");
+        if (p != null)
+        {
+            player = p.transform;
+            playerCtrl = p.GetComponent<PlayerController>();
+        }
     }
 
     private void Update()
     {
-        if (playerTransform == null) return;
+        if (isDead || player == null) return;
+        if (GameManager.Instance != null && !GameManager.Instance.IsPlaying) return;
+        if (!agent.isActiveAndEnabled || !agent.isOnNavMesh) return;
 
-        float distance = Vector3.Distance(transform.position, playerTransform.position);
+        float dist = Vector3.Distance(transform.position, player.position);
 
-        if (distance <= detectRange)
+        // ponytail: ì‹œì•¼ íŒì • ì—†ìŒ(ë²½ ë„ˆë¨¸ë„ ì¸ì§€). ì—„íë¬¼ ë ˆë²¨ì´ë©´ Physics.Linecastë¡œ obstacleMask ì²´í¬ ì¶”ê°€.
+        if (dist > detectRange)
         {
-            // ¿¡ÀÌÀüÆ®°¡ ÄÑÁ® ÀÖ°í, ½ÇÁ¦ ±¸¿öÁø ¸Ê(NavMesh) À§¿¡ Á¤»óÀûÀ¸·Î ¼­ ÀÖÀ» ¶§¸¸ ¸í·ÉÀ» ³»¸³´Ï´Ù.
-            if (agent.isActiveAndEnabled && agent.isOnNavMesh)
-            {
-                agent.isStopped = false;
-                agent.SetDestination(playerTransform.position); 
-            }
-            else
-            {
-                return;
-            }
-
-            if (distance <= 4f) 
-            {
-                isCrouching = true;
-                isRunning = false;
-                agent.speed = patrolSpeed * 0.5f; 
-            }
-            else if (distance > 12f) 
-            {
-                isCrouching = false;
-                isRunning = true;
-                agent.speed = patrolSpeed * 2f;   
-            }
-            else 
-            {
-                isCrouching = false;
-                isRunning = false;
-                agent.speed = patrolSpeed;
-            }
-        }
-        else 
-        {
-            if (agent.isActiveAndEnabled && agent.isOnNavMesh)
-            {
-                agent.isStopped = true;
-            }
+            agent.isStopped = true;
             isCrouching = false;
             isRunning = false;
+        }
+        else if (attackStyle == AttackStyle.Melee)
+        {
+            TickMelee(dist);
+        }
+        else
+        {
+            TickRanged(dist);
         }
 
         UpdateAnimator();
     }
 
+    private void TickMelee(float dist)
+    {
+        agent.isStopped = false;
+        agent.SetDestination(player.position);
+
+        isCrouching = dist <= 4f;
+        isRunning = dist > 12f;
+        agent.speed = isCrouching ? moveSpeed * 0.5f : (isRunning ? moveSpeed * 2f : moveSpeed);
+
+        if (dist <= attackRange && Time.time >= nextAttackTime)
+        {
+            nextAttackTime = Time.time + attackCooldown;
+            if (anim != null) anim.SetTrigger("attack");
+            if (playerCtrl != null) playerCtrl.TakeDamage(attackDamage);
+        }
+    }
+
+    private void TickRanged(float dist)
+    {
+        float near = preferredRange * 0.6f;
+        float far = preferredRange * 1.2f;
+
+        if (dist < near)
+        {
+            Vector3 away = (transform.position - player.position).normalized;
+            agent.isStopped = false;
+            agent.speed = moveSpeed * 1.5f;
+            agent.SetDestination(transform.position + away * 4f);
+            isRunning = true;
+            isCrouching = false;
+        }
+        else if (dist > far)
+        {
+            agent.isStopped = false;
+            agent.speed = dist > preferredRange * 2f ? moveSpeed * 2f : moveSpeed;
+            agent.SetDestination(player.position);
+            isRunning = agent.speed > moveSpeed;
+            isCrouching = false;
+        }
+        else
+        {
+            agent.isStopped = true;
+            isRunning = false;
+            isCrouching = false;
+            FaceTarget();
+
+            if (Time.time >= nextAttackTime)
+            {
+                nextAttackTime = Time.time + attackCooldown;
+                if (anim != null) anim.SetTrigger("attack");
+                RangedAttack();
+            }
+        }
+    }
+
+    private void RangedAttack()
+    {
+        if (projectilePrefab == null) return;
+
+        Vector3 origin = muzzle != null ? muzzle.position : transform.position + Vector3.up * 1.5f;
+        Vector3 dir = ((player.position + Vector3.up) - origin).normalized;
+
+        GameObject go = Instantiate(projectilePrefab, origin, Quaternion.LookRotation(dir));
+        EnemyProjectile proj = go.GetComponent<EnemyProjectile>();
+        if (proj != null)
+        {
+            proj.speed = projectileSpeed;
+            proj.damage = projectileDamage;
+            proj.Launch(dir);
+        }
+    }
+
+    private void FaceTarget()
+    {
+        Vector3 dir = player.position - transform.position;
+        dir.y = 0f;
+        if (dir.sqrMagnitude < 0.01f) return;
+        transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir), 10f * Time.deltaTime);
+    }
+
+    /// <summary>EnemyTargetì´ ì‚¬ë§ ì‹œ í˜¸ì¶œ. ì´ë™/ê³µê²© ì •ì§€.</summary>
+    public void OnDeath()
+    {
+        isDead = true;
+        if (agent.isActiveAndEnabled && agent.isOnNavMesh) agent.isStopped = true;
+        agent.enabled = false;
+        enabled = false;
+    }
+
     private void UpdateAnimator()
     {
-        // [¾ÈÀü º¸°­] ¾Ö´Ï¸ŞÀÌÅÍ°¡ ¾ÆÁ÷ ¾ø´Â ÀÓ½Ã ±øÅë »óÅÂ¶ó¸é ¾Æ·¡ ´ëÀÔÀ» ¿ÏÀüÈ÷ °Ç³Ê¶Ù¾î ¿¡·¯¸¦ ¹æÁöÇÕ´Ï´Ù.
         if (anim == null) return;
-
         anim.SetBool("isCrouching", isCrouching);
         anim.SetBool("isRunning", isRunning);
-        anim.SetBool("isMoving", agent.velocity.magnitude > 0.1f);
+        anim.SetBool("isMoving", agent.velocity.sqrMagnitude > 0.01f);
         anim.SetFloat("moveSpeed", agent.velocity.magnitude);
     }
 
@@ -98,6 +189,8 @@ public class RobotEnemyAI : MonoBehaviour
     {
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, detectRange);
+        Gizmos.color = new Color(1f, 0.5f, 0f);
+        Gizmos.DrawWireSphere(transform.position, attackStyle == AttackStyle.Ranged ? preferredRange : attackRange);
         Gizmos.color = Color.red;
         Gizmos.DrawWireSphere(transform.position, stopRange);
     }
