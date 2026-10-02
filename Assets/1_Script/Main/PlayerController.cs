@@ -336,9 +336,9 @@ public class PlayerController : MonoBehaviour
         Rigidbody rb = b.GetComponent<Rigidbody>();
         if (rb != null)
         {
-            rb.velocity = Vector3.zero;
+            rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
-            rb.velocity = (target - origin).normalized * bulletSpeed;
+            rb.linearVelocity = (target - origin).normalized * bulletSpeed;
         }
 
         PooledObject po = b.GetComponent<PooledObject>();

@@ -25,7 +25,7 @@ public class EnemyProjectile : MonoBehaviour
     {
         direction = direction.normalized;
         transform.forward = direction;
-        rb.velocity = direction * speed;
+        rb.linearVelocity = direction * speed;
         Destroy(gameObject, lifetime);
     }
 
