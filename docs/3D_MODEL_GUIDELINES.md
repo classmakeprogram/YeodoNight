@@ -9,17 +9,27 @@
 
 ```
 Assets/
+  1_Script/Main/        게임 스크립트 (아트 담당은 수정 X)
   Art/
     Characters/
-      Player/           Player.fbx, 텍스처, 머티리얼, 프리팹
-      RobotEnemy/       RobotEnemy.fbx, ...
+      Player/
+      RobotEnemy/       현재 Robot_Soldier 에셋이 여기 있음
+        Meshes/         RobotEnemy.fbx (메시 + 스켈레톤)
+        Animations/     RobotEnemy@Idle.fbx … + RobotEnemy.controller
+        Materials/      .mat
+        Textures/       .png
+        Prefabs/        모델 원본 프리팹(아트 확인용)
     Weapons/
-      AK47/
+      AK47/             AK47.fbx, Materials/, Textures/
       Katana/
-    Props/
+    Props/              픽업·투사체 메시
     _Source/            .blend / .max 원본 (빌드에서 제외)
+  Prefabs/              게임에서 실제로 쓰는 프리팹 (Enemy.prefab 등, 스크립트 연결된 것)
+  Scenes/               SampleScene.unity
 ```
 
+- **에셋을 `Assets/` 루트나 저장소 루트에 두지 말 것.** 반드시 위 구조 안에 넣는다.
+- `Art/` 아래 프리팹은 "모델만 있는 것", `Assets/Prefabs/` 는 "스크립트·콜라이더까지 붙은 게임용"으로 구분.
 - 파일명: `PascalCase`, 공백·한글·특수문자 금지. 예) `RobotEnemy_Walk.fbx`
 - 하나의 캐릭터 = 하나의 `.fbx` (메시 + 스켈레톤). 애니메이션 클립은 별도 `.fbx`로:
   `RobotEnemy@Idle.fbx`, `RobotEnemy@Walk.fbx` … (`@` 앞이 같으면 Unity가 같은 릭으로 인식)
@@ -48,7 +58,7 @@ Assets/
 | 카타나 | 1k ~ 4k | 1 (칼날/손잡이 분리 시 2) |
 | 소품 | 상황에 맞게 최소 | 1 |
 
-- 머티리얼은 **URP Lit**(프로젝트가 URP인 경우) 또는 Standard. 같은 재질은 머티리얼 하나 공유.
+- 머티리얼은 **Standard** 셰이더 (이 프로젝트는 Built-in 렌더 파이프라인. URP Lit 쓰면 분홍색으로 깨짐). 같은 재질은 머티리얼 하나 공유.
 - 실시간 그림자에 안 쓰는 디테일은 노멀맵으로.
 
 ## 4. 텍스처
@@ -174,7 +184,96 @@ Assets/
 - `Library/`, `Temp/`, `Logs/`, `Build/` 는 `.gitignore` (커밋 금지).
 - 커밋은 에셋 단위로: "로봇 적 Walk/Run 애니메이션 추가" 처럼.
 
-## 10. 제출 전 체크리스트
+## 10. 에셋 연결 방법 (Unity 작업 순서)
+
+모델을 받은 뒤 게임에서 실제로 돌게 만드는 과정. 코드가 무엇을 기대하는지 기준으로 적었다.
+
+### 10-1. 임포트
+
+1. 1절 폴더 구조에 맞는 위치로 `.fbx` 와 텍스처를 **Unity 에디터 Project 창 안에서** 드래그한다.
+   탐색기로 직접 옮기면 `.meta` 가 따라가지 않아 참조가 깨진다. 이미 Unity 안에 있는 에셋을 옮길 때도 Project 창에서.
+2. `.fbx` 선택 ▸ Inspector:
+   - **Model 탭**: Scale Factor `1`, Convert Units 체크. Apply 후 씬에 드래그해서 키 1.7~1.9 m 확인
+   - **Rig 탭**: Animation Type `Humanoid`, Avatar Definition `Create From This Model` ▸ Apply ▸ `Configure…` 에서 본 매핑이 전부 초록인지 확인
+     - 애니메이션 전용 `.fbx` (`RobotEnemy@Walk.fbx`)는 Avatar Definition `Copy From Other Avatar` ▸ 본체 fbx의 Avatar 지정
+   - **Animation 탭**: 클립별로 Loop Time(루프 클립만), Root Transform Rotation/Position(Y)/Position(XZ) 전부 `Bake Into Pose` 체크 (Root Motion 사용 안 함)
+   - **Materials 탭**: `Extract Materials…` ▸ 같은 캐릭터 폴더의 `Materials/` 로 추출
+3. 텍스처 Import 설정:
+   - `_Normal` ▸ Texture Type `Normal map`
+   - `_MetallicSmoothness`, `_AO` ▸ **sRGB 체크 해제**
+   - Max Size: 캐릭터 2048, 무기 1024
+4. 추출된 머티리얼(`Standard`)에 맵 연결: Albedo ▸ `_Albedo`, Metallic ▸ `_MetallicSmoothness`(Source = Metallic Alpha), Normal Map ▸ `_Normal`, Occlusion ▸ `_AO`, 발광부는 Emission 체크 후 `_Emission`
+
+### 10-2. 로봇 적 프리팹 (`Assets/Prefabs/Enemy.prefab`)
+
+지금 `Enemy.prefab` 은 캡슐 임시 모델이다. 실제 모델로 교체하는 방법:
+
+1. `RobotEnemy.fbx` 를 씬에 드래그 ▸ 이름을 `RobotEnemy` 로 변경. **이 모델 오브젝트가 루트가 된다.**
+   - `EnemyTarget` 과 `RobotEnemyAI` 는 `GetComponent<Animator>()` 로 **같은 오브젝트의** Animator만 찾는다.
+     모델을 빈 오브젝트의 자식으로 넣으면 애니메이션 파라미터가 전달되지 않는다.
+2. 루트에 컴포넌트 추가:
+
+   | 컴포넌트 | 설정 |
+   |---|---|
+   | `Animator` | Controller = 10-3에서 만든 컨트롤러, Avatar = fbx Avatar, **Apply Root Motion 해제** |
+   | `NavMeshAgent` | Speed 3.5, Stopping Distance 2, Radius 0.4~0.5, Height = 실측 키, **Base Offset 0** (피벗이 발밑이므로) |
+   | `EnemyTarget` | `baseHp` 80, `deathDelay` = Death 클립 길이(초) |
+   | `RobotEnemyAI` | `attackStyle`, `eye` = Head 본 (비우면 1.5 m 높이 사용) |
+
+   - 루트 태그 `Enemy`. **루트에 큰 Capsule Collider를 두지 않는다** (부위 판정이 안 됨).
+3. 부위 콜라이더 (본의 자식으로 빈 오브젝트를 만들어 붙인다. 본 자체에 붙여도 됨):
+
+   | 오브젝트 | 부모 본 (Robot_Soldier 기준) | 콜라이더 | `Hitbox` |
+   |---|---|---|---|
+   | `Head` | `Head` | Sphere, 반지름 ≈ 머리 크기 | `isHead` ✓, `damageMultiplier` 3.2 |
+   | `Body` | `Spine1` | Capsule, 몸통 감쌈 | `isHead` ✗, 1.0 |
+   | `Arm_L/R`, `Leg_L/R` (선택) | `LeftArm` / `LeftUpLeg` … | Capsule | ✗, 0.7 |
+
+   - 전부 `Is Trigger` 해제. `Hitbox` 는 부모 쪽 `EnemyTarget` 을 자동으로 찾는다.
+4. 원거리 로봇이면 총구 끝에 빈 오브젝트 `Muzzle` (위치만 사용, 발사 방향은 코드가 플레이어 쪽으로 계산) ▸ `RobotEnemyAI.muzzle`, `projectilePrefab` = 10-5의 투사체, `attackStyle = Ranged`.
+5. 프리팹 저장:
+   - **기존 `Enemy.prefab` 교체**: 씬의 `RobotEnemy` 를 Project 창 `Assets/Prefabs/Enemy.prefab` 위로 드래그 ▸ `Replace`.
+     스포너 참조(GUID)가 그대로라 추가 연결 불필요.
+   - **새 프리팹으로**: `Assets/Prefabs/` 에 드래그해 저장 ▸ 씬 `EnemySpawner` 의 `enemyPrefab` / `hiddenEnemyPrefab` 에 연결.
+   - 저장 후 씬에 남은 `RobotEnemy` 는 삭제 (스포너가 생성한다).
+6. 숨은 적을 다른 외형으로 하려면 프리팹을 하나 더 만들어 `hiddenEnemyPrefab` 에 연결. 태그·`isHiddenEnemy` 는 스포너가 자동 설정.
+
+### 10-3. 애니메이터 컨트롤러
+
+1. `Art/Characters/RobotEnemy/Animations/` 에서 우클릭 ▸ Create ▸ Animator Controller ▸ `RobotEnemy.controller`
+2. Parameters 탭에 7절 표의 파라미터를 **이름·타입 그대로** 추가.
+3. 스테이트 구성 (로봇 적 예시):
+   - `Locomotion` (기본 스테이트): Blend Tree, 파라미터 `moveSpeed` ▸ 0 = Idle, 3.5 = Walk, 7 = Run
+   - `Crouch`: `isCrouching` true 진입 / false 복귀
+   - `Attack`, `Hit`: Any State ▸ 트리거(`attack`, `hit`) ▸ 끝나면 Locomotion 복귀 (Has Exit Time)
+   - `Death`: Any State ▸ `die`. **나가는 트랜지션 없음**, Any State 트랜지션의 `Can Transition To Self` 해제
+4. 루트의 `Animator.Controller` 에 연결.
+5. 플레이어는 `PlayerController.animator` 필드에 직접 연결하므로 Animator가 자식(팔 모델)에 있어도 된다.
+
+### 10-4. 무기 (플레이어 1인칭)
+
+씬의 `Main Camera` 아래 `AK47_Temp`, `Katana_Temp` 가 임시 큐브다. 교체 방법:
+
+1. `Art/Weapons/AK47/AK47.fbx` 를 `Main Camera` 의 자식으로 드래그 ▸ 화면 오른쪽 아래에 보이도록 Position/Rotation 조정
+2. 총구 끝에 빈 오브젝트 `Muzzle` 추가
+3. `player` 의 `PlayerController` ▸ `akObject` 를 새 모델로 교체 ▸ `AK47_Temp` 삭제
+   - 무기 전환은 이 오브젝트를 `SetActive` 로 켜고 끄는 방식. **무기 모델에 콜라이더를 두지 말 것** (자기 사격 레이캐스트에 맞음)
+4. 카타나도 같은 방식 ▸ `katanaObject`. 칼날 끝에 `TrailRenderer` (Emitting 해제, 6절 색상) ▸ `katanaTrail`
+5. 프리팹으로 저장해 두면 다른 씬에서도 재사용 가능: `Assets/Prefabs/Weapons/`
+
+### 10-5. 투사체 · 픽업
+
+- **투사체** (`Assets/Prefabs/EnemyProjectile.prefab`): 루트에 메시, `Sphere Collider`(Is Trigger ✓), `Rigidbody`(Is Kinematic ✗), `EnemyProjectile`. 지름 0.2~0.4 m
+- **픽업** (`Assets/Prefabs/HealthPickup.prefab`, `AmmoPickup.prefab`): 루트에 `Collider`(Is Trigger ✓) + `Pickup`(`kind`, `amount`). 메시는 자식으로 두고 `Pickup.visual` 에 연결 (재생성 시 이 자식만 껐다 켬)
+
+### 10-6. 연결 후 확인
+
+1. NavMesh 위에서 적이 추격하는지 (안 움직이면 Base Offset·스폰 위치 확인, `docs/UNITY_SETUP.md` 8절)
+2. Animator 창을 열어둔 채 Play ▸ 파라미터 값이 바뀌는지
+3. 머리/몸통 사격 시 데미지 숫자 차이 (헤드 = 3.2배)
+4. Console에 `Missing` / `The referenced script` 경고 없는지
+
+## 11. 제출 전 체크리스트
 
 - [ ] 트랜스폼 Apply, 스케일 1, Unity에서 실측 크기 정상
 - [ ] Import: Scale Factor 1, Animation Type 올바름(Humanoid), Avatar 생성됨
@@ -183,4 +282,5 @@ Assets/
 - [ ] 적: 루트에 `EnemyTarget`, 최소 `Head` 콜라이더 + `Hitbox(isHead, mult 3.2)`
 - [ ] 루프 애니메이션 Loop Time 체크, Root Motion 해제
 - [ ] `.meta` 포함해서 커밋, 대용량은 LFS
-- [ ] 씬에 드래그 → 플레이 → 애니메이션·피격 판정 눈으로 확인
+- [ ] 에셋이 1절 폴더 안에 있음 (`Assets/` 루트·저장소 루트 X)
+- [ ] 10절 순서로 프리팹 연결 후 10-6 확인 통과
