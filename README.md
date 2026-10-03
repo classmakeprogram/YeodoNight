@@ -94,7 +94,7 @@ wasd 이동 마우스 좌(발사) 우(정조준-홀드) 휠로 무기 전환 쉬
 - [ ] 프리팹 제작: 적(근접/원거리), 투사체, 픽업 — `UNITY_SETUP.md` 5~7절. `Prefabs/Enemy.prefab` 1종만 있음, 투사체·픽업 없음
 - [ ] 매니저·Player·Canvas 배치 및 인스펙터 연결 (`UNITY_SETUP.md` 4절) — Player·Canvas·MissionManager·EnemySpawner 배치됨, GameManager/ScoreManager/HUD 없음
 - [ ] UI 패널 5종(타이틀/HUD/일시정지/게임오버/클리어) + 조준점 이미지 제작
-- [ ] 3D 모델·릭·애니메이션 — 적 모델(`Robot_Soldier` 에셋, Run_Aim 애니) 임포트됨. 무기/플레이어 모델 없음, 트레이서는 임시 primitive
+- [ ] 3D 모델·릭·애니메이션 — 적 모델(`Art/Characters/RobotEnemy`, Run_Aim 애니), AK47 fbx 임포트됨. 카타나·플레이어 모델 없음, 트레이서는 임시 primitive
 - [ ] 애니메이터 컨트롤러 + 파라미터 연결 (3D 가이드라인 7절 이름표) — `.controller` 없음
 
 ## P1 — 완성도
