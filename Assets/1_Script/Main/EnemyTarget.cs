@@ -18,10 +18,12 @@ public class EnemyTarget : MonoBehaviour
     public float Hp { get; private set; }
     private bool isDead;
     private Animator anim;
+    private RobotEnemyAI ai;
 
     private void Awake()
     {
         anim = GetComponent<Animator>();
+        ai = GetComponent<RobotEnemyAI>();
     }
 
     private void Start()
@@ -41,6 +43,7 @@ public class EnemyTarget : MonoBehaviour
 
         Hp -= damage;
         if (anim != null) anim.SetTrigger("hit");
+        if (Hp > 0f && ai != null) ai.OnHit();
 
         if (HUD.Instance != null)
             HUD.Instance.ReportHit(transform.position + Vector3.up * 1.6f, damage, isHeadshot, Hp <= 0f);
@@ -48,11 +51,17 @@ public class EnemyTarget : MonoBehaviour
         if (Hp <= 0f) Die(isHeadshot);
     }
 
-    private void Die(bool isHeadshot)
+    /// <summary>자폭형이 스스로 터질 때. 플레이어 처치가 아니므로 점수·미션 카운트 없음.</summary>
+    public void SelfDestruct()
+    {
+        if (isDead) return;
+        Die(false, false);
+    }
+
+    private void Die(bool isHeadshot, bool byPlayer = true)
     {
         isDead = true;
 
-        RobotEnemyAI ai = GetComponent<RobotEnemyAI>();
         if (ai != null) ai.OnDeath();
 
         foreach (Collider c in GetComponentsInChildren<Collider>())
@@ -63,6 +72,14 @@ public class EnemyTarget : MonoBehaviour
         // 스포너가 생존 수를 먼저 갱신해야 MissionManager의 보충 스폰 판정이 정확하다.
         if (EnemySpawner.Instance != null)
             EnemySpawner.Instance.NotifyEnemyKilled();
+
+        if (!byPlayer)
+        {
+            if (EnemySpawner.Instance != null) EnemySpawner.Instance.EnsureEnemiesAlive();
+            Destroy(gameObject);
+            return;
+        }
+
         if (MissionManager.Instance != null)
             MissionManager.Instance.OnEnemyKilled(isHeadshot, isHiddenEnemy);
         if (ScoreManager.Instance != null)

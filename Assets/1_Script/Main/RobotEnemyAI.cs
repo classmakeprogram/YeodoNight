@@ -5,12 +5,14 @@ using UnityEngine.AI;
 /// 로봇 적 AI. 감지 범위 안에 플레이어가 들어오면 반응한다.
 ///  - Melee : 붙어서 근접 공격
 ///  - Ranged: 선호 사거리를 유지하며 투사체 발사(너무 가까우면 후퇴)
+///  - Explode: 붙어서 자폭(범위 데미지, 처치 점수 없음)
+/// HiddenEnemy 태그면 플레이어가 가까이 오거나 맞힐 때까지 모습을 감추고 대기한다.
 /// 거리/상태를 애니메이터에 전달한다.
 /// </summary>
 [RequireComponent(typeof(NavMeshAgent))]
 public class RobotEnemyAI : MonoBehaviour
 {
-    public enum AttackStyle { Melee, Ranged }
+    public enum AttackStyle { Melee, Ranged, Explode }
 
     [Header("이동")]
     public float moveSpeed = 3.5f;
@@ -28,6 +30,16 @@ public class RobotEnemyAI : MonoBehaviour
     public float attackDamage = 10f;      // 근접 데미지
     public float attackRange = 2.5f;      // 근접 사거리
     public float attackCooldown = 1.5f;
+    [Tooltip("자폭형 폭발 반경. 데미지는 attackDamage.")]
+    public float explodeRadius = 3f;
+
+    [Header("피격")]
+    public float staggerTime = 0.3f;
+    public float knockback = 0.5f;
+
+    [Header("숨은 적")]
+    [Tooltip("이 거리 안에서 시야가 트이면 정체를 드러낸다.")]
+    public float revealRange = 6f;
 
     [Header("원거리 (attackStyle = Ranged)")]
     public GameObject projectilePrefab;   // EnemyProjectile 컴포넌트를 가진 프리팹
@@ -44,6 +56,9 @@ public class RobotEnemyAI : MonoBehaviour
     private bool isCrouching;
     private bool isRunning;
     private bool isDead;
+    private float staggerUntil;
+    private bool concealed;
+    private Renderer[] renderers;
 
     private void Awake()
     {
@@ -64,6 +79,19 @@ public class RobotEnemyAI : MonoBehaviour
             player = p.transform;
             playerCtrl = p.GetComponent<PlayerController>();
         }
+
+        // 태그는 스포너가 Instantiate 직후 바꾸므로 Awake가 아니라 Start에서 확인한다.
+        if (CompareTag("HiddenEnemy"))
+        {
+            renderers = GetComponentsInChildren<Renderer>();
+            SetConcealed(true);
+        }
+    }
+
+    private void SetConcealed(bool value)
+    {
+        concealed = value;
+        foreach (Renderer r in renderers) r.enabled = !value;
     }
 
     private void Update()
@@ -74,6 +102,20 @@ public class RobotEnemyAI : MonoBehaviour
 
         float dist = Vector3.Distance(transform.position, player.position);
 
+        if (concealed)
+        {
+            agent.isStopped = true;
+            if (dist <= revealRange && HasLineOfSight()) SetConcealed(false);
+            return;
+        }
+
+        if (Time.time < staggerUntil)
+        {
+            agent.isStopped = true;
+            UpdateAnimator();
+            return;
+        }
+
         // 시야(LOS) 판정: 벽 등에 가려지면 인지하지 않는다. obstacleMask로 차단 레이어를 지정한다.
         if (dist > detectRange || !HasLineOfSight())
         {
@@ -81,15 +123,16 @@ public class RobotEnemyAI : MonoBehaviour
             isCrouching = false;
             isRunning = false;
         }
-        else if (attackStyle == AttackStyle.Melee)
-        {
-            TickMelee(dist);
-        }
-        else
+        else if (attackStyle == AttackStyle.Ranged)
         {
             TickRanged(dist);
         }
+        else
+        {
+            TickMelee(dist);
+        }
 
+        if (isDead) return; // 자폭한 경우
         UpdateAnimator();
     }
 
@@ -104,10 +147,20 @@ public class RobotEnemyAI : MonoBehaviour
 
         if (dist <= attackRange && Time.time >= nextAttackTime)
         {
+            if (attackStyle == AttackStyle.Explode) { Explode(); return; }
             nextAttackTime = Time.time + attackCooldown;
             if (anim != null) anim.SetTrigger("attack");
             if (playerCtrl != null) playerCtrl.TakeDamage(attackDamage);
         }
+    }
+
+    private void Explode()
+    {
+        if (playerCtrl != null && Vector3.Distance(transform.position, player.position) <= explodeRadius)
+            playerCtrl.TakeDamage(attackDamage);
+        EnemyTarget t = GetComponent<EnemyTarget>();
+        if (t != null) t.SelfDestruct();
+        else Destroy(gameObject);
     }
 
     private void TickRanged(float dist)
@@ -155,14 +208,7 @@ public class RobotEnemyAI : MonoBehaviour
         Vector3 origin = muzzle != null ? muzzle.position : transform.position + Vector3.up * 1.5f;
         Vector3 dir = ((player.position + Vector3.up) - origin).normalized;
 
-        GameObject go = Instantiate(projectilePrefab, origin, Quaternion.LookRotation(dir));
-        EnemyProjectile proj = go.GetComponent<EnemyProjectile>();
-        if (proj != null)
-        {
-            proj.speed = projectileSpeed;
-            proj.damage = projectileDamage;
-            proj.Launch(dir);
-        }
+        EnemyProjectile.Fire(projectilePrefab, origin, dir, projectileSpeed, projectileDamage);
     }
 
     private void FaceTarget()
@@ -171,6 +217,20 @@ public class RobotEnemyAI : MonoBehaviour
         dir.y = 0f;
         if (dir.sqrMagnitude < 0.01f) return;
         transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir), 10f * Time.deltaTime);
+    }
+
+    /// <summary>EnemyTarget이 피격 시 호출. 잠깐 경직 + 플레이어 반대 방향으로 밀림. 숨은 적은 정체가 드러난다.</summary>
+    public void OnHit()
+    {
+        if (isDead) return;
+        if (concealed) SetConcealed(false);
+        staggerUntil = Time.time + staggerTime;
+        if (player != null && agent.isActiveAndEnabled && agent.isOnNavMesh)
+        {
+            Vector3 away = transform.position - player.position;
+            away.y = 0f;
+            agent.Move(away.normalized * knockback);
+        }
     }
 
     /// <summary>EnemyTarget이 사망 시 호출. 이동/공격 정지.</summary>

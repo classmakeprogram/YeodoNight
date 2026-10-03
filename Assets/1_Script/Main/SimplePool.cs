@@ -30,7 +30,9 @@ public class SimplePool
     /// <summary>풀에서 꺼내 배치하고 활성화한다.</summary>
     public GameObject Get(Vector3 position, Quaternion rotation)
     {
-        GameObject go = idle.Count > 0 ? idle.Pop() : Create();
+        GameObject go = null;
+        while (go == null && idle.Count > 0) go = idle.Pop(); // 씬 리로드 등으로 파괴된 항목은 버린다
+        if (go == null) go = Create();
         go.transform.SetPositionAndRotation(position, rotation);
         go.SetActive(true);
         return go;

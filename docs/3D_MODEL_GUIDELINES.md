@@ -113,13 +113,17 @@ Assets/
 | `isCrouching` | Bool | 웅크림 토글 |
 | `isSprinting` | Bool | 달리기(스태미너 소모 중) |
 | `isRolling` | Bool | 구르기 중 |
+| `isSliding` | Bool | 슬라이딩 중 |
 | `isAiming` | Bool | 우클릭 정조준 중 |
 | `weapon` | Int | 0 = AK-47, 1 = Katana |
+| `katanaCombo` | Int | 카타나 평타 콤보 단계 0/1/2 (`katanaAttack` 직전에 세팅) |
 | `jump` | Trigger | 점프 시작 |
 | `roll` | Trigger | 구르기 |
+| `slide` | Trigger | 슬라이딩 |
 | `shoot` | Trigger | AK 발사 |
 | `reload` | Trigger | 재장전 |
 | `katanaAttack` | Trigger | 카타나 공격 |
+| `katanaSkill` | Trigger | 카타나 스킬(대시+광역 베기) |
 | `hit` | Trigger | 피격 |
 | `die` | Trigger | 사망 |
 

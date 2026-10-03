@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -19,6 +20,8 @@ public class PlayerController : MonoBehaviour
     public float jumpForce = 5f;
     public float rollSpeed = 12f;
     public float rollDuration = 0.4f;
+    public float slideSpeed = 10f;
+    public float slideDuration = 0.6f;
     public float standHeight = 2f;
     public float crouchHeight = 1f;
 
@@ -36,16 +39,35 @@ public class PlayerController : MonoBehaviour
     public int magazineSize = 30;
     public int reserveAmmo = 90;
     public int maxReserveAmmo = 180;
-    public float akDamage = 25f;
+    public float akDamageMin = 20f;
+    public float akDamageMax = 30f;
     public float fireRate = 0.1f;
     public float range = 100f;
     public float reloadTime = 2.5f;
     public float bulletSpeed = 40f;
+    [Tooltip("탄퍼짐 각도(도). 정조준 시 절반.")]
+    public float spreadAngle = 2f;
+    [Tooltip("연사 시 발당 추가 탄퍼짐(도). 사격을 멈추면 회복.")]
+    public float bloomPerShot = 0.3f;
+    public float bloomMax = 3f;
+    [Tooltip("발당 카메라 반동(도, 위쪽).")]
+    public float recoilKick = 1f;
 
     [Header("카타나")]
     public float katanaDamage = 40f;
     public float katanaRange = 3f;
     public float katanaCooldown = 0.5f;
+    [Tooltip("콤보 단계별 데미지 배수(평타 1→2→3타).")]
+    public float[] katanaComboMultipliers = { 1f, 1.2f, 1.5f };
+    public float katanaComboWindow = 0.8f;
+
+    [Header("카타나 스킬 (우클릭)")]
+    public float skillDamage = 60f;
+    public float skillRadius = 3f;
+    public float skillCooldown = 6f;
+    public float skillStaminaCost = 30f;
+    public float skillDashSpeed = 20f;
+    public float skillDashDuration = 0.2f;
 
     [Header("무기 오브젝트")]
     public GameObject akObject;
@@ -83,10 +105,15 @@ public class PlayerController : MonoBehaviour
     private bool isSprinting;
     private bool isReloading;
     private bool isRolling;
+    private bool isSliding;
     private bool isAttacking;
     private float lastStaminaUseTime;
     private float nextFireTime;
     private float nextKatanaTime;
+    private float nextSkillTime;
+    private int katanaComboStep;
+    private float lastKatanaTime;
+    private float bloom;
     private WeaponType currentWeapon = WeaponType.AK47;
 
     // 트레이서용 공유 머티리얼 1개만 생성. 이펙트팀 머즐/트레이서 에셋 나오면 SpawnTracer 교체.
@@ -130,6 +157,7 @@ public class PlayerController : MonoBehaviour
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
         }
+        mouseSensitivity = PlayerPrefs.GetFloat(GameManager.SensitivityKey, mouseSensitivity);
         EquipWeapon(WeaponType.AK47);
     }
 
@@ -167,22 +195,27 @@ public class PlayerController : MonoBehaviour
         if (input.sqrMagnitude > 1f) input.Normalize();
 
         bool wantsSprint = Input.GetKey(KeyCode.LeftShift) && !isCrouching && z > 0.1f && Stamina > 0f;
-        isSprinting = wantsSprint && !isRolling;
+        bool dashing = isRolling || isSliding;
+        isSprinting = wantsSprint && !dashing;
 
         float speed = isCrouching ? crouchSpeed : (isSprinting ? sprintSpeed : walkSpeed);
-        if (!isRolling)
+        if (!dashing)
             controller.Move(input * speed * Time.deltaTime);
 
-        if (Input.GetButtonDown("Jump") && isGrounded && !isCrouching && !isRolling)
+        if (Input.GetButtonDown("Jump") && isGrounded && !isCrouching && !dashing)
         {
             velocity.y = Mathf.Sqrt(jumpForce * -2f * Physics.gravity.y);
             SetTrigger("jump");
         }
 
-        if (Input.GetKeyDown(KeyCode.C) && !isRolling)
-            SetCrouch(!isCrouching);
+        // 달리는 중 C = 슬라이딩(끝나면 웅크린 상태), 그 외 C = 웅크리기 토글
+        if (Input.GetKeyDown(KeyCode.C) && !dashing)
+        {
+            if (isSprinting && isGrounded) StartCoroutine(SlideRoutine(transform.forward));
+            else SetCrouch(!isCrouching);
+        }
 
-        if (Input.GetKeyDown(KeyCode.Q) && isGrounded && !isRolling && Stamina >= rollCost)
+        if (Input.GetKeyDown(KeyCode.Q) && isGrounded && !dashing && Stamina >= rollCost)
         {
             Vector3 dir = input.sqrMagnitude > 0.01f ? input.normalized : transform.forward;
             StartCoroutine(RollRoutine(dir));
@@ -198,15 +231,27 @@ public class PlayerController : MonoBehaviour
         UseStamina(rollCost);
         SetTrigger("roll");
         if (isCrouching) SetCrouch(false);
+        yield return Dash(dir * rollSpeed, rollDuration);
+        isRolling = false;
+    }
 
-        float t = 0f;
-        while (t < rollDuration)
+    private IEnumerator SlideRoutine(Vector3 dir)
+    {
+        isSliding = true;
+        SetTrigger("slide");
+        SetCrouch(true);
+        yield return Dash(dir * slideSpeed, slideDuration);
+        isSliding = false;
+    }
+
+    /// <summary>수평 대시. 수직 이동은 HandleMovement가 계속 처리한다.</summary>
+    private IEnumerator Dash(Vector3 v, float duration)
+    {
+        for (float t = 0f; t < duration; t += Time.deltaTime)
         {
-            controller.Move(dir * rollSpeed * Time.deltaTime); // 수직 이동은 HandleMovement가 계속 처리
-            t += Time.deltaTime;
+            controller.Move(v * Time.deltaTime);
             yield return null;
         }
-        isRolling = false;
     }
 
     private void SetCrouch(bool value)
@@ -250,6 +295,7 @@ public class PlayerController : MonoBehaviour
 
     private void HandleCombat()
     {
+        bloom = Mathf.MoveTowards(bloom, 0f, bloomMax * 2f * Time.deltaTime);
         bool ads = currentWeapon == WeaponType.AK47 && Input.GetMouseButton(1) && !isReloading;
         if (playerCam != null)
         {
@@ -266,7 +312,7 @@ public class PlayerController : MonoBehaviour
 
             if (Input.GetMouseButton(0) && !isReloading && Time.time >= nextFireTime)
             {
-                if (CurrentAmmo > 0) ShootAK47();
+                if (CurrentAmmo > 0) ShootAK47(ads);
                 else TryReload();
             }
         }
@@ -274,23 +320,31 @@ public class PlayerController : MonoBehaviour
         {
             if (Input.GetMouseButtonDown(0) && !isAttacking && Time.time >= nextKatanaTime)
                 StartCoroutine(KatanaAttackRoutine());
+            else if (Input.GetMouseButtonDown(1) && !isAttacking && Time.time >= nextSkillTime && Stamina >= skillStaminaCost)
+                StartCoroutine(KatanaSkillRoutine());
         }
     }
 
-    private void ShootAK47()
+    private void ShootAK47(bool ads)
     {
         CurrentAmmo--;
         nextFireTime = Time.time + fireRate;
         SetTrigger("shoot");
 
+        // 탄퍼짐: 기본 각도(정조준 시 절반) + 연사 누적분. 반동: 카메라를 위로 튕긴다.
+        float spread = (ads ? spreadAngle * 0.5f : spreadAngle) + bloom;
+        bloom = Mathf.Min(bloomMax, bloom + bloomPerShot);
+        xRotation = Mathf.Clamp(xRotation - recoilKick, -85f, 85f);
+
+        Vector2 r = Random.insideUnitCircle * spread;
         Vector3 origin = playerCam.transform.position;
-        Vector3 dir = playerCam.transform.forward;
+        Vector3 dir = playerCam.transform.rotation * Quaternion.Euler(r.y, r.x, 0f) * Vector3.forward;
         Vector3 endPoint = origin + dir * range;
 
         if (Physics.Raycast(origin, dir, out RaycastHit hit, range, ~0, QueryTriggerInteraction.Ignore))
         {
             endPoint = hit.point;
-            ApplyHit(hit, akDamage);
+            ApplyHit(hit, Random.Range(akDamageMin, akDamageMax));
         }
         SpawnTracer(endPoint);
     }
@@ -299,17 +353,48 @@ public class PlayerController : MonoBehaviour
     {
         isAttacking = true;
         nextKatanaTime = Time.time + katanaCooldown;
+
+        // 콤보 창 안에 다시 베면 다음 단계, 아니면 1타부터.
+        katanaComboStep = Time.time - lastKatanaTime <= katanaComboWindow
+            ? (katanaComboStep + 1) % katanaComboMultipliers.Length : 0;
+        lastKatanaTime = Time.time;
+        SetInt("katanaCombo", katanaComboStep);
         SetTrigger("katanaAttack");
         if (katanaTrail != null) katanaTrail.emitting = true;
 
         Vector3 origin = playerCam.transform.position;
         Vector3 dir = playerCam.transform.forward;
         if (Physics.Raycast(origin, dir, out RaycastHit hit, katanaRange, ~0, QueryTriggerInteraction.Ignore))
-            ApplyHit(hit, katanaDamage);
+            ApplyHit(hit, katanaDamage * katanaComboMultipliers[katanaComboStep]);
 
         yield return new WaitForSeconds(0.3f);
         if (katanaTrail != null) katanaTrail.emitting = false;
         yield return new WaitForSeconds(0.1f);
+        isAttacking = false;
+    }
+
+    /// <summary>카타나 스킬: 전방 대시 후 주변 광역 베기.</summary>
+    private IEnumerator KatanaSkillRoutine()
+    {
+        isAttacking = true;
+        nextSkillTime = Time.time + skillCooldown;
+        UseStamina(skillStaminaCost);
+        SetTrigger("katanaSkill");
+        if (katanaTrail != null) katanaTrail.emitting = true;
+
+        Vector3 fwd = transform.forward;
+        yield return Dash(fwd * skillDashSpeed, skillDashDuration);
+
+        // 부위 콜라이더가 여러 개라도 적 1명당 1번만 맞힌다.
+        HashSet<EnemyTarget> hitSet = new HashSet<EnemyTarget>();
+        foreach (Collider c in Physics.OverlapSphere(transform.position + fwd, skillRadius, ~0, QueryTriggerInteraction.Ignore))
+        {
+            EnemyTarget e = c.GetComponentInParent<EnemyTarget>();
+            if (e != null && hitSet.Add(e)) e.TakeDamage(skillDamage, false);
+        }
+
+        yield return new WaitForSeconds(0.2f);
+        if (katanaTrail != null) katanaTrail.emitting = false;
         isAttacking = false;
     }
 
@@ -420,6 +505,7 @@ public class PlayerController : MonoBehaviour
         animator.SetBool("isCrouching", isCrouching);
         animator.SetBool("isSprinting", isSprinting);
         animator.SetBool("isRolling", isRolling);
+        animator.SetBool("isSliding", isSliding);
     }
 
     private void SetTrigger(string n) { if (animator != null) animator.SetTrigger(n); }
