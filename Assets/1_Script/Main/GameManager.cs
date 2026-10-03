@@ -1,6 +1,7 @@
 using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UI;
 
 /// <summary>
 /// 게임 흐름 상태기: 타이틀 → 플레이 → (일시정지) → 게임오버 / 클리어 → 타이틀.
@@ -28,6 +29,13 @@ public class GameManager : MonoBehaviour
     public float idleReturnSeconds = 90f;
     public bool startInTitle = true;
 
+    [Header("옵션 (일시정지 패널의 슬라이더, 비워도 됨)")]
+    public Slider sensitivitySlider;
+    public Slider volumeSlider;
+
+    public const string SensitivityKey = "mouseSensitivity";
+    public const string VolumeKey = "volume";
+
     public GameState State { get; private set; }
     public bool IsPlaying => State == GameState.Playing;
 
@@ -41,6 +49,18 @@ public class GameManager : MonoBehaviour
 
     private void Start()
     {
+        AudioListener.volume = PlayerPrefs.GetFloat(VolumeKey, 1f);
+        if (volumeSlider != null)
+        {
+            volumeSlider.SetValueWithoutNotify(AudioListener.volume);
+            volumeSlider.onValueChanged.AddListener(SetVolume);
+        }
+        if (sensitivitySlider != null)
+        {
+            sensitivitySlider.SetValueWithoutNotify(PlayerPrefs.GetFloat(SensitivityKey, sensitivitySlider.value));
+            sensitivitySlider.onValueChanged.AddListener(SetMouseSensitivity);
+        }
+
         if (startInTitle) EnterTitle();
         else StartRun();
     }
@@ -148,6 +168,19 @@ public class GameManager : MonoBehaviour
     {
         Time.timeScale = 1f;
         SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
+    }
+
+    public void SetMouseSensitivity(float value)
+    {
+        PlayerPrefs.SetFloat(SensitivityKey, value);
+        PlayerController p = FindAnyObjectByType<PlayerController>();
+        if (p != null) p.mouseSensitivity = value;
+    }
+
+    public void SetVolume(float value)
+    {
+        PlayerPrefs.SetFloat(VolumeKey, value);
+        AudioListener.volume = value;
     }
 
     /// <summary>일시정지 화면 "종료" 버튼용.</summary>

@@ -59,11 +59,11 @@
 |---|---|
 | WASD / 마우스 | 이동 / 시점 |
 | Shift(홀드) | 달리기(스태미너, 전진 중) |
-| C | 웅크리기 토글 |
+| C | 웅크리기 토글 / 달리는 중이면 슬라이딩 |
 | Q | 구르기 |
 | Space | 점프 |
 | 좌클릭 | AK 발사 / 카타나 공격 |
-| 우클릭(홀드) | AK 정조준 |
+| 우클릭(홀드) | AK 정조준 / 카타나 스킬(대시+광역 베기) |
 | R | 재장전 |
 | 휠 / 1 / 2 | 무기 전환 |
 | Esc | 일시정지 토글 |
@@ -122,6 +122,7 @@ Scene
 **EnemySpawner**
 - `mode` = `Mission` 또는 `Waves`
 - `enemyPrefab` `hiddenEnemyPrefab`
+- `extraEnemyPrefabs` (선택) = 탱커·자폭형 등 추가 종류. `enemyPrefab`과 같은 확률로 섞여 나온다
 - `normalSpawnPoints` = SpawnPoints/Normal_* 전부, `hiddenSpawnPoint` = Hidden_0
 
 **HUD** (Panel_HUD에 부착)
@@ -141,6 +142,8 @@ Scene
 |---|---|
 | Panel_Pause / Resume | `GameManager.SetPaused(false)` |
 | Panel_Pause / Quit | `GameManager.QuitGame()` |
+
+옵션: Panel_Pause에 Slider 2개를 두고 `GameManager.sensitivitySlider`(Min 50, Max 400 권장) / `volumeSlider`(0~1)에 연결만 하면 된다. 이벤트 연결·저장(PlayerPrefs)은 코드가 처리.
 | Panel_GameOver·Clear / 다시하기 (선택) | `GameManager.ReturnToTitle()` |
 
 ## 5. 적 프리팹
@@ -148,7 +151,7 @@ Scene
 ```
 RobotEnemy (tag=Enemy)
 ├── EnemyTarget        baseHp, deathDelay(사망 애니 길이)
-├── RobotEnemyAI       attackStyle = Melee / Ranged
+├── RobotEnemyAI       attackStyle = Melee / Ranged / Explode
 ├── NavMeshAgent       Speed 3.5, Stopping Distance 2, Radius/Height 실측
 ├── Animator           (선택) 파라미터는 3D 가이드라인 7절
 ├── Hips/Spine/…       스켈레톤
@@ -161,6 +164,9 @@ RobotEnemy (tag=Enemy)
 - 콜라이더 `Is Trigger` 해제.
 - 숨은 적 프리팹은 같은 구성 + tag `HiddenEnemy` (스포너가 자동 지정도 함).
 - **원거리 로봇**: `attackStyle = Ranged`, `projectilePrefab` 연결, `muzzle` 지정, `preferredRange`(기본 12) 조정.
+- **자폭형**: `attackStyle = Explode`. 붙으면 `explodeRadius` 안의 플레이어에게 `attackDamage`를 주고 사라진다(처치 점수 없음).
+- **탱커**: 코드 없음. 프리팹 변형으로 `baseHp`↑(예 250), `moveSpeed`↓(예 2), `staggerTime`·`knockback` 0.
+- 숨은 적은 플레이어가 `revealRange` 안에서 보거나 맞힐 때까지 렌더러가 꺼진 채 대기한다.
 
 ## 6. 투사체 프리팹 (`EnemyProjectile`)
 
@@ -228,3 +234,6 @@ HealthPickup / AmmoPickup
 - [ ] 플레이어 사망 → 게임오버 패널 → 랭킹 입력 → 저장 → 8초 후 타이틀
 - [ ] 90초 방치 → 타이틀 복귀
 - [ ] 픽업으로 체력·탄약 회복(가득이면 소모 안 됨)
+- [ ] 슬라이딩, 카타나 3타 콤보·우클릭 스킬, AK 반동·탄퍼짐
+- [ ] 적 피격 경직·넉백, 숨은 적 은폐→발각, 자폭형 폭발
+- [ ] 옵션 슬라이더(감도·볼륨) 값이 재시작 후에도 유지

@@ -74,12 +74,15 @@ public class MissionManager : MonoBehaviour
                 case Mission.KillFive:
                     if (KillCount < killsRequired) return;
                     CurrentMission = Mission.KillHidden;
+                    if (EnemySpawner.Instance != null) EnemySpawner.Instance.SpawnHidden();
                     Debug.Log("[미션 완료] 다음 목표: 숨은 적 처치");
                     continue;
 
                 case Mission.KillHidden:
                     if (!KilledHiddenEnemy) return;
                     CurrentMission = Mission.HeadshotThree;
+                    if (EnemySpawner.Instance != null)
+                        EnemySpawner.Instance.TopUp(headshotsRequired - HeadshotKillCount);
                     Debug.Log("[미션 완료] 다음 목표: 헤드샷 3명");
                     continue;
 
